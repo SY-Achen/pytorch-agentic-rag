@@ -28,7 +28,9 @@ def main():
         print("✓ key saved (add .deepseek_key to .gitignore)")
         return
     import agent
-    agent.set_llm(get_key())
+    base = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
+    model = os.environ.get("LLM_MODEL", "deepseek-chat")
+    agent.set_llm(get_key(), base_url=base, model=model)
     q = " ".join(args)
     if not q:
         sys.exit("Usage: python cli.py \"your question\"")

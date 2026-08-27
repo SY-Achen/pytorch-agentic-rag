@@ -31,13 +31,26 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
 
+# module-level caches: load BGE model + Chroma client once, reuse across calls.
+# ponytail: naive cache; a proper store would pool embeddings, but one-shot load is fine.
+_M = None
+_COLL = None
+
+
+def _resources():
+    global _M, _COLL
+    if _M is None:
+        _M = SentenceTransformer(EMB_MODEL)
+    if _COLL is None:
+        _COLL = chromadb.PersistentClient(path=DB_DIR).get_collection(COLLECTION)
+    return _M, _COLL
+
+
 @tool
 def retrieve(query: str) -> str:
     """Retrieve relevant passages from the PyTorch documentation given a natural-language question."""
-    model = SentenceTransformer(EMB_MODEL)
-    client = chromadb.PersistentClient(path=DB_DIR)
-    coll = client.get_collection(COLLECTION)
-    q = model.encode([query], normalize_embeddings=True).tolist()[0]
+    m, coll = _resources()
+    q = m.encode([query], normalize_embeddings=True).tolist()[0]
     res = coll.query(query_embeddings=[q], n_results=TOP_K)
     return "\n\n---\n\n".join(res["documents"][0])
 
@@ -55,7 +68,7 @@ def build_graph():
         last = state["messages"][-1]
         if getattr(last, "tool_calls", None):
             return "tools"
-        return END
+        return "answer"  # no tool call -> go to answer node (which ends)
 
     def answer_node(state):
         """When the agent produced a final answer, pass it through."""
@@ -72,9 +85,9 @@ def build_graph():
     return g.compile()
 
 
-def set_llm(api_key: str, base_url: str = "https://api.deepseek.com"):
+def set_llm(api_key: str, base_url: str = "https://api.deepseek.com", model: str = "deepseek-chat"):
     global llm
-    llm = ChatOpenAI(model="deepseek-chat", api_key=api_key, base_url=base_url, temperature=0)
+    llm = ChatOpenAI(model=model, api_key=api_key, base_url=base_url, temperature=0)
 
 
 def ask(question: str) -> str:
