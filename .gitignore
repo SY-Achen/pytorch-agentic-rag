@@ -1,0 +1,6 @@
+.venv/
+vector_db/
+data/
+.deepseek_key
+__pycache__/
+*.pyc

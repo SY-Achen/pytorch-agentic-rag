@@ -1,0 +1,7 @@
+# requirements.txt
+sentence-transformers>=2.7
+chromadb>=0.5
+langgraph>=0.2
+langchain-openai>=0.2
+beautifulsoup4>=4.12
+requests>=2.31
