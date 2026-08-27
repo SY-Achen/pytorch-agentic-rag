@@ -57,6 +57,7 @@ def retrieve(query: str) -> str:
 
 def build_graph():
     assert llm is not None, "call set_llm() first"
+    _resources()  # init model + chroma client on the caller (main) thread, NOT inside tool threads
     tool_node = ToolNode([retrieve])
     agent = llm.bind_tools([retrieve])
 
