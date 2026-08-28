@@ -32,7 +32,6 @@ class AgentState(TypedDict):
 
 
 # module-level caches: load BGE model + Chroma client once, reuse across calls.
-# ponytail: naive cache; a proper store would pool embeddings, but one-shot load is fine.
 _M = None
 _COLL = None
 
