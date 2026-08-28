@@ -16,9 +16,14 @@ from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 from typing import Annotated, TypedDict
 
+from pathlib import Path
+from typing import Annotated, TypedDict
+
+# EMB_MODEL env var overrides; default resolves the ModelScope cache under the user's home dir.
 EMB_MODEL = os.environ.get(
     "EMB_MODEL",
-    "C:/Users/Administrator/.cache/modelscope/models/AI-ModelScope--bge-small-zh-v1.5/snapshots/master",
+    str(Path.home() / ".cache" / "modelscope" / "models"
+        / "AI-ModelScope--bge-small-zh-v1.5" / "snapshots" / "master"),
 )
 DB_DIR = os.environ.get("DB_DIR", "vector_db")
 COLLECTION = "pytorch_docs"
