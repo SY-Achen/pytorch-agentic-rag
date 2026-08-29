@@ -53,10 +53,14 @@ def _resources():
 @tool
 def retrieve(query: str) -> str:
     """Retrieve relevant passages from the PyTorch documentation given a natural-language question."""
-    m, coll = _resources()
-    q = m.encode([query], normalize_embeddings=True).tolist()[0]
-    res = coll.query(query_embeddings=[q], n_results=TOP_K)
-    return "\n\n---\n\n".join(res["documents"][0])
+    try:
+        m, coll = _resources()
+        q = m.encode([query], normalize_embeddings=True).tolist()[0]
+        res = coll.query(query_embeddings=[q], n_results=TOP_K)
+        return "\n\n---\n\n".join(res["documents"][0])
+    except Exception as e:
+        # 工具失败不崩溃:错误作为消息传回给 LLM,让它决定重试/换方式/放弃检索
+        return f"检索失败: {e}"
 
 
 def build_graph():
