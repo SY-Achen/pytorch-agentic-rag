@@ -1,15 +1,16 @@
-"""Agentic RAG over PyTorch docs using LangGraph.
+"""Agentic RAG over PyTorch docs using LangGraph — Enterprise Edition.
 
-The LLM (orchestrator) decides: answer directly, or call the retriever tool
-then answer from retrieved context. This makes retrieval agent-driven rather
-than a fixed retrieve-then-generate pipeline.
+Key upgrades (Day 9):
+- Modular tool architecture (tools/retrieve_tool.py) with tenacity retry
+- Structured logging via EnterpriseTraceHandler callback
+- Circuit breaker: max 3 tool-call retries before forcing answer
 """
 import os
+import logging
 import chromadb
 from sentence_transformers import SentenceTransformer
 
 from langchain_openai import ChatOpenAI
-from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import START, END, StateGraph
 from langgraph.prebuilt import ToolNode
@@ -17,26 +18,33 @@ from langgraph.graph.message import add_messages
 from typing import Annotated, TypedDict
 
 from pathlib import Path
-from typing import Annotated, TypedDict
+from tools import retrieve
+from middleware.tracing_handler import EnterpriseTraceHandler
 
-# EMB_MODEL env var overrides; default resolves the ModelScope cache under the user's home dir.
+# -- Config (overridable via env vars) --
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
+LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
+LLM_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+DB_DIR = os.environ.get("DB_DIR", "vector_db")
+COLLECTION = "pytorch_docs"
+TOP_K = 5
+MAX_RETRY_COUNT = int(os.environ.get("MAX_RETRY_COUNT", "3"))
+
 EMB_MODEL = os.environ.get(
     "EMB_MODEL",
     str(Path.home() / ".cache" / "modelscope" / "models"
         / "AI-ModelScope--bge-small-zh-v1.5" / "snapshots" / "master"),
 )
-DB_DIR = os.environ.get("DB_DIR", "vector_db")
-COLLECTION = "pytorch_docs"
-TOP_K = 5
 
 llm = None  # set by set_llm()
 
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
+    retry_count: int  # ponytail: circuit breaker — counts consecutive tool-callereturns to avoid infinite loops
 
 
-# module-level caches: load BGE model + Chroma client once, reuse across calls.
+# module-level caches
 _M = None
 _COLL = None
 
@@ -50,22 +58,17 @@ def _resources():
     return _M, _COLL
 
 
-@tool
-def retrieve(query: str) -> str:
-    """Retrieve relevant passages from the PyTorch documentation given a natural-language question."""
-    try:
-        m, coll = _resources()
-        q = m.encode([query], normalize_embeddings=True).tolist()[0]
-        res = coll.query(query_embeddings=[q], n_results=TOP_K)
-        return "\n\n---\n\n".join(res["documents"][0])
-    except Exception as e:
-        # 工具失败不崩溃:错误作为消息传回给 LLM,让它决定重试/换方式/放弃检索
-        return f"检索失败: {e}"
+def build_graph(callbacks=None):
+    """Build and compile the LangGraph state machine.
 
-
-def build_graph():
+    Args:
+        callbacks: Optional list of LangChain BaseCallbackHandler instances.
+                   Defaults to [EnterpriseTraceHandler()] if None.
+    """
     assert llm is not None, "call set_llm() first"
-    _resources()  # init model + chroma client on the caller (main) thread, NOT inside tool threads
+    _resources()
+
+    # ponytail: use the modular tool with built-in tenacity retry
     tool_node = ToolNode([retrieve])
     agent = llm.bind_tools([retrieve])
 
@@ -76,11 +79,18 @@ def build_graph():
     def should_call_tools(state):
         last = state["messages"][-1]
         if getattr(last, "tool_calls", None):
+            # Circuit breaker: if we've retried too many times, force answer
+            if state.get("retry_count", 0) >= MAX_RETRY_COUNT:
+                logging.warning(
+                    "Circuit breaker triggered: retry_count=%d >= %d, "
+                    "forcing final answer.",
+                    state["retry_count"], MAX_RETRY_COUNT,
+                )
+                return "answer"
             return "tools"
-        return "answer"  # no tool call -> go to answer node (which ends)
+        return "answer"
 
     def answer_node(state):
-        """When the agent produced a final answer, pass it through."""
         return {"messages": state["messages"]}
 
     g = StateGraph(AgentState)
@@ -88,27 +98,35 @@ def build_graph():
     g.add_node("tools", tool_node)
     g.add_node("answer", answer_node)
     g.add_edge(START, "agent")
-    g.add_conditional_edges("agent", should_call_tools, ["tools", "answer"])
+    g.add_conditional_edges(
+        "agent", should_call_tools, ["tools", "answer"]
+    )
     g.add_edge("tools", "agent")
     g.add_edge("answer", END)
-    return g.compile()
+    graph = g.compile(callbacks=callbacks or [EnterpriseTraceHandler()])
+    return graph
 
 
-def set_llm(api_key: str, base_url: str = "https://api.deepseek.com", model: str = "deepseek-chat"):
+def set_llm(api_key=None, base_url=None, model=None):
     global llm
+    api_key = api_key or LLM_API_KEY
+    base_url = base_url or LLM_BASE_URL
+    model = model or LLM_MODEL
+    assert api_key, "API key required"
     llm = ChatOpenAI(model=model, api_key=api_key, base_url=base_url, temperature=0)
 
 
-def ask(question: str) -> str:
+def ask(question: str, callbacks=None) -> str:
+    """Run one query through the agent graph."""
     history = [SystemMessage(content=(
         "You are a PyTorch documentation assistant. Answer using the retrieved "
         "documentation. If you need specifics, call the retrieve tool. "
         "If you don't know, say so — don't make things up."))]
-    graph = build_graph()
-    final_state = graph.invoke({"messages": history + [HumanMessage(content=question)]})
+    graph = build_graph(callbacks=callbacks)
+    initial = {"messages": history + [HumanMessage(content=question)]}
+    final_state = graph.invoke(initial)
     return final_state["messages"][-1].content
 
 
 if __name__ == "__main__":
-    # demo with a fake LLM is not possible pre-key; ensure graph builds when key present.
-    print("Run `python cli.py \"your question\"` after set_llm().")
+    print("Run `python cli.py \"your question\"` after setting DEEPSEEK_API_KEY.")
