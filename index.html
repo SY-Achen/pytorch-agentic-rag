@@ -1,0 +1,159 @@
+<!-- smart_ui.html — Enterprise RAG Single-Page UI -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>智链星图 · 企业智能问答</title>
+    <!-- Lazy loading via CDN (Tailwind CSS) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .msg-container::-webkit-scrollbar { height: 6px; }
+        .msg-content pre { background: #f1f5f9; padding: 10px; border-radius: 5px; overflow-x: auto; font-size: 0.9em; }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex items-center justify-center text-slate-800">
+
+    <!-- LOGIN SCREEN -->
+    <div id="login-view" class="w-full max-w-md p-8 bg-white rounded-xl shadow-xl transition-all">
+        <h1 class="text-2xl font-bold mb-6 text-center text-indigo-600">🔐 智链星图 Access</h1>
+        <input id="username" type="text" placeholder="Username (zhangsan/lisi)" class="w-full px-4 py-2 border rounded-lg mb-3 focus:ring-2 focus:ring-indigo-400 outline-none">
+        <input id="password" type="password" placeholder="Password (123)" class="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-400 outline-none">
+        <button onclick="doLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition-colors">Sign In</button>
+        <p class="mt-4 text-xs text-gray-400 text-center">Demo Accounts: zhangsan(sales)/lisi(engineering)/wangwu(admin)</p>
+    </div>
+
+    <!-- CHAT SCREEN -->
+    <div id="chat-view" class="hidden w-[90%] max-w-4xl h-[90vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        <!-- Top Bar -->
+        <div class="flex items-center justify-between p-4 border-b bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+            <div>
+                <span class="font-bold text-lg">🤖 智链星图 Agent</span>
+                <span id="dept-badge" class="ml-3 px-2 py-0.5 bg-white/20 rounded text-sm">--</span>
+            </div>
+            <button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded hover:bg-white/40">Logout</button>
+        </div>
+        
+        <!-- Messages Area -->
+        <div id="messages" class="flex-1 overflow-y-auto p-6 msg-container space-y-4 bg-gray-50">
+            <div class="text-center text-gray-400 text-sm mt-4">Welcome! You are accessing via <b id="user-display">Guest</b></div>
+        </div>
+
+        <!-- Upload Preview -->
+        <div id="preview-area" class="hidden px-6 pb-2 flex gap-2 items-center bg-gray-50 overflow-x-auto"></div>
+
+        <!-- Input Area -->
+        <div class="p-4 bg-white border-t">
+            <div class="flex items-end gap-2">
+                <label class="cursor-pointer text-gray-400 hover:text-indigo-600 p-2">
+                    📎
+                    <input type="file" id="file-input" multiple class="hidden" onchange="handleFiles(this.files)">
+                </label>
+                <textarea id="msg-input" rows="2" class="flex-1 border rounded-lg px-4 py-2 resize-none focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Ask anything..."></textarea>
+                <button onclick="sendMessage()" id="send-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let attachments = []; // Stores base64 strings
+
+        async function doLogin() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: u, password: p})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    currentUser = data.user_info;
+                    showChatUI();
+                } else {
+                    alert(data.error);
+                }
+            } catch(e) { alert("Server Error"); }
+        }
+
+        function showChatUI() {
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('chat-view').classList.remove('hidden');
+            document.getElementById('user-display').innerText = currentUser.name;
+            document.getElementById('dept-badge').innerText = currentUser.dept.toUpperCase() + " Dept";
+        }
+
+        function logout() {
+            location.reload();
+        }
+
+        function handleFiles(files) {
+            const previewArea = document.getElementById('preview-area');
+            previewArea.innerHTML = '';
+            previewArea.classList.remove('hidden');
+            attachments = [];
+
+            Array.from(files).forEach(f => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const b64 = e.target.result;
+                    attachments.push(b64);
+                    
+                    const thumb = document.createElement('img');
+                    thumb.src = b64;
+                    thumb.className = "h-12 w-12 object-cover rounded border";
+                    previewArea.appendChild(thumb);
+                };
+                reader.readAsDataURL(f);
+            });
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('msg-input');
+            const text = input.value.trim();
+            if (!text && attachments.length === 0) return;
+
+            appendMsg('You', text, attachments.map(a => `<img src="${a}" class="max-h-32 block mt-1 rounded"/>`).join(''));
+            input.value = ''; attachments = [];
+            document.getElementById('preview-area').innerHTML = ''; document.getElementById('preview-area').classList.add('hidden');
+            document.getElementById('send-btn').disabled = true;
+
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        message: text,
+                        files: attachments,
+                        username: currentUser.username || Object.keys(requireUserMap())[0], 
+                        dept: currentUser.dept
+                    })
+                });
+                const data = await res.json();
+                appendMsg('Agent', data.reply, '');
+            } catch(e) { appendMsg('System', 'Connection failed.', ''); } finally {
+                document.getElementById('send-btn').disabled = false;
+            }
+        }
+
+        function appendMsg(role, text, imgHtml) {
+            const c = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.className = role === 'You' ? 'text-right' : 'text-left';
+            div.innerHTML = `
+                <div class="inline-block max-w-[80%] ${role === 'You' ? 'bg-indigo-600 text-white' : 'bg-white border rounded-lg p-4 shadow-sm'} rounded-t-xl">
+                    <div class="text-xs opacity-75 mb-1">${role} • ${new Date().toLocaleTimeString()}</div>
+                    <div class="msg-content whitespace-pre-wrap">${text}</div>
+                    ${imgHtml}
+                </div>`;
+            c.appendChild(div);
+            c.scrollTop = c.scrollHeight;
+        }
+
+        // Simple mapping to get username string from global state (since Pydantic expects strict types)
+        const requireUserMap = () => ({username: currentUser.username || 'default'});
+    </script>
+</body>
+</html>
