@@ -63,7 +63,7 @@ def login(req: LoginRequest):
     """Verify credentials and issue session context."""
     user = MOCK_USERS.get(req.username)
     if user and user["password"] == req.password:
-        return {"success": True, "token": f"session_{req.username}", "user_info": user}
+        return {"success": True, "token": f"session_{req.username}", "user_info": {**user, "username": req.username}}
     return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
 
 @app.post("/api/upload_image")

@@ -37,7 +37,7 @@ def _do_retrieve(query: str, metadata_filter: Optional[dict] = None) -> str:
     q = m.encode([query], normalize_embeddings=True).tolist()[0]
     kwargs = {"query_embeddings": [q], "n_results": TOP_K}
     if metadata_filter:
-        kwargs["filter"] = metadata_filter  # ChromaDB $and/$gte support
+        kwargs["where"] = metadata_filter  # ChromaDB $and/$gte support (v1.5+)
     res = coll.query(**kwargs)
     docs = res["documents"][0]
 
