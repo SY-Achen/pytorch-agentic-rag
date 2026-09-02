@@ -1,0 +1,45 @@
+{
+  "top_k": 5,
+  "stats": {
+    "total_tests": 8,
+    "context_recall_avg": 0.449,
+    "context_precision_avg": 1.0,
+    "ndcg_avg": 1.0,
+    "faithfulness_avg": 0.476,
+    "overall_score": 0.731,
+    "per_test": [
+      [
+        "qa_01",
+        0.789
+      ],
+      [
+        "qa_02",
+        0.764
+      ],
+      [
+        "qa_03",
+        0.704
+      ],
+      [
+        "qa_04",
+        0.733
+      ],
+      [
+        "qa_05",
+        0.776
+      ],
+      [
+        "qa_06",
+        0.738
+      ],
+      [
+        "qa_07",
+        0.728
+      ],
+      [
+        "qa_08",
+        0.619
+      ]
+    ]
+  }
+}
