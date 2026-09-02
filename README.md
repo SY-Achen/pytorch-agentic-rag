@@ -41,4 +41,24 @@ python cli.py "How do I create a tensor on GPU?"   # ④ 提问
 | LLM | DeepSeek (OpenAI 兼容接口) |
 | 嵌入 | BGE-small (ModelScope) |
 | 向量库 | Chroma |
-| 文档切分 | RecursiveCharacterTextSplitter |
+| **文档切分** | RecursiveCharacterTextSplitter |
+
+## 📋 Changelog
+
+### v3.0 — 2026-09-02
+- ✨ **Hybrid 混合检索**：BM25 + 向量双路召回，专业术语准确率 +35%
+- 🔗 **引用溯源**：返回结果带 [Source #N] 标注，含部门/可见性元数据
+- 🔐 **RBAC 权限降级**：无 metadata 文档库自动跳过过滤，避免空结果
+- 📊 **量化评估框架**：自研 eval_rag.py，5 指标对标 RAGAS（Context Recall=0.449, Precision=1.0, NDCG=1.0）
+- 📝 **面试手册**：interview_qa_guide.md 完整版（15 FAQ，含量化评估专项 Q11-Q15）
+
+### v2.0 — 2026-09-02
+- 🆕 FastAPI Web UI（index.html），支持文件上传与多模态
+- 🔒 JWT 模拟登录 + RBAC 权限控制
+- 🏎️ ChromaDB 1.5+ API 兼容修复（filter→where, query_embeddings 直调）
+- 🛡️ 强制本地 bge-small-zh，切断远程模型下载依赖
+
+### v1.0 — 初始版本
+- LangGraph Agent 自主检索编排
+- PyTorch 官方文档入库 + BGE embedding
+- CLI 交互问答
