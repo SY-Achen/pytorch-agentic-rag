@@ -28,4 +28,5 @@ def retrieve(query: str, filter_json: Optional[str] = None) -> str:
             If None, searches the entire collection.
     """
     metadata_filter = json.loads(filter_json) if filter_json else None
-    return _do_retrieve(query, metadata_filter=metadata_filter)
+    # ponytail: hybrid=True enables BM25 re-rank + citation sources
+    return _do_retrieve(query, metadata_filter=metadata_filter, hybrid=True)
