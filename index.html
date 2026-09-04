@@ -26,8 +26,28 @@
         <input id="username" type="text" placeholder="用户名（zhangsan/lisi）" class="w-full px-4 py-2 border rounded-lg mb-3 focus:ring-2 focus:ring-indigo-400 outline-none">
         <input id="password" type="password" placeholder="密码（123）" class="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-400 outline-none">
         <button onclick="doLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition-colors">登录</button>
-        <p class="mt-4 text-xs text-gray-400 text-center">演示账号：zhangsan(销售)/lisi(工程)/wangwu(管理员)</p>
-        <p class="mt-2 text-[11px] text-gray-400 text-center leading-relaxed">📌 数据集来源：AntSQL 金融语义解析数据集（蚂蚁财富 / 阿里云天池）<br>仅作系统内部技术验证与测试使用，未进行任何商业化</p>
+        
+        <div class="mt-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-left text-xs text-slate-600 space-y-2">
+            <div class="font-bold text-indigo-600 border-b pb-1 flex items-center gap-1">
+                <span>📢 演示系统说明与测试凭据</span>
+            </div>
+            <div>
+                <b>1. 测试账号与密码：</b><br>
+                • 销售部：<code class="bg-indigo-50 text-indigo-700 px-1 rounded">zhangsan</code> / 密码 <code class="bg-indigo-50 text-indigo-700 px-1 rounded">123</code><br>
+                • 工程部：<code class="bg-indigo-50 text-indigo-700 px-1 rounded">lisi</code> / 密码 <code class="bg-indigo-50 text-indigo-700 px-1 rounded">123</code><br>
+                • 管理员：<code class="bg-indigo-50 text-indigo-700 px-1 rounded">wangwu</code> / 密码 <code class="bg-indigo-50 text-indigo-700 px-1 rounded">123</code>
+            </div>
+            <div>
+                <b>2. 系统定位说明：</b><br>
+                本系统仅为个人校招与技术测试 DEMO，深知架构、工程鲁棒性及高并发能力距离工业级企业中台仍有一定差距。
+            </div>
+            <div>
+                <b>3. 部署与算力环境：</b><br>
+                部署于阿里云 <b>2C2G</b> 入门级服务器（Docker 镜像限制 1800MB 内存）。LLM 决策走 DeepSeek 官方 API，BGE-small 稠密向量化与 Chroma 向量数据库检索均在云端节点本地完成。
+            </div>
+        </div>
+
+        <p class="mt-3 text-[11px] text-gray-400 text-center leading-relaxed">📌 数据集来源：AntSQL 金融语义解析数据集（蚂蚁财富 / 阿里云天池）<br>仅作系统内部技术验证与测试使用，未进行任何商业化</p>
     </div>
 
     <!-- MAIN APP -->
