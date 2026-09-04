@@ -1228,5 +1228,8 @@ def usage_stats():
 # ── Serve UI ────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def index(response: Response):
-    with open(APP_DIR / "index.html", "r", encoding="utf-8") as f:
+    try:
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return HTMLResponse(content=(APP_DIR / "index.html").read_text(encoding="utf-8"))
+    except Exception as e:
+        return HTMLResponse(content=f"<h3>Server Error loading index.html: {e}</h3>", status_code=500)
