@@ -1,26 +1,34 @@
-# Virtual environments & cache
+# Python & Environment
 .venv/
 __pycache__/
 *.pyc
 *.pyo
 .cache/
 
-# Local data & databases (contains runtime user sessions & feedback)
+# Local databases, data directories & runtime logs
 data/
 vector_db/
 chroma_db/
 uploads/
+data_docs/
 *.db
 *.db-journal
 *.jsonl
+eval_results*.json
+
+# Private Interview & Internal Review docs
+interview_*.md
+*interview*.md
+*ROADMAP*.md
+EVAL_REPORT.md
+docs/private/
 
 # Secret configs & API keys
 .env
 .env.local
 .deepseek_key
 
-# Attachments & temporary docs
-data_docs/
+# Temporary artifacts
 *.zip
 .hermes/
 EOF
