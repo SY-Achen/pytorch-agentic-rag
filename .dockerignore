@@ -1,0 +1,36 @@
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.tox/
+
+# ── Env / Secrets ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Data (mounted via volume, not in image) ─────────────────
+sessions.db
+feedback.jsonl
+trace.jsonl
+uploads/
+vector_db/
+data/
+
+# ── Git ──────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── Docs ─────────────────────────────────────────────────────
+*.md
+DEPLOYMENT.md
+interview_qa_bank.md
+
+# ── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

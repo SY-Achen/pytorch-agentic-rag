@@ -11,22 +11,21 @@ from dataclasses import dataclass, field
 # -- singleton resources (module-level cache) --
 _M = None
 _COLL = None
-_DB_DIR = os.environ.get("DB_DIR", "vector_db")
+_DB_DIR = os.environ.get("DB_DIR", "/app/data/vector_db")
 _COLLECTION = "pytorch_docs"
 _TOP_K = 5
-_EMB_MODEL_PATH = os.environ.get(
-    "EMB_MODEL",
-    str(Path.home() / ".cache" / "modelscope" / "models"
-        / "AI-ModelScope--bge-small-zh-v1.5" / "snapshots" / "master"),
-)
+_EMB_MODEL_PATH = os.environ.get("EMB_MODEL", "BAAI/bge-small-zh-v1.5")
 
 
 def _resources():
     global _M, _COLL
     if _M is None:
-        _M = SentenceTransformer(_EMB_MODEL_PATH)
+        model_path = _EMB_MODEL_PATH
+        if not os.path.exists(model_path):
+            model_path = "BAAI/bge-small-zh-v1.5"
+        _M = SentenceTransformer(model_path)
     if _COLL is None:
-        _COLL = chromadb.PersistentClient(path=_DB_DIR).get_collection(_COLLECTION)
+        _COLL = chromadb.PersistentClient(path=_DB_DIR).get_or_create_collection(_COLLECTION)
     return _M, _COLL
 
 
@@ -100,7 +99,7 @@ def _do_retrieve(
     # ponytail: bypass coll.query(query_texts=[...]) which triggers auto-embed
     #   download attempts. We encode locally and pass raw embeddings.
     q_vec = m.encode([query], normalize_embeddings=True).tolist()[0]
-    kwargs: dict = {"query_embeddings": [q_vec], "n_results": min(actual_top_k * 2, 20)}
+    kwargs: dict = {"query_embeddings": [q_vec], "n_results": min(max(actual_top_k * 4, 20), 20)}  # ponytail: recall 20 then rerank to top_k
     if metadata_filter:
         kwargs["where"] = metadata_filter
     res = coll.query(**kwargs)
@@ -133,7 +132,7 @@ def _do_retrieve(
                 d.combined_score = d.combined_score * 0.6 + (d.combined_score / max_bm25) * 0.4
 
     scored.sort(key=lambda x: x.combined_score, reverse=True)
-    final = scored[:actual_top_k]
+    final = scored[:actual_top_k]  # reranked top_k from ~20 candidates
 
     if not final:
         return "[EMPTY] No matching documents found."
@@ -141,10 +140,10 @@ def _do_retrieve(
     # Build output with citation sources
     parts = []
     for i, d in enumerate(final, 1):
-        src_meta = d.meta
-        dept = src_meta.get("dept", "unknown") if isinstance(src_meta, dict) else "unknown"
-        visibility = src_meta.get("visibility", "?") if isinstance(src_meta, dict) else "?"
-        src_line = f"[Source #{i}] Dept={dept}, Clearance={visibility}"
+        src_meta = d.meta if isinstance(d.meta, dict) else {}
+        doc_name = src_meta.get("source", src_meta.get("filename", "未知文档"))
+        dept = src_meta.get("dept", "通用")
+        src_line = f"[Source #{i}] File={doc_name}, Dept={dept}"
         parts.append(f"{src_line}\n{d.text}")
 
     # Low-similarity warning

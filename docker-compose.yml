@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  rag-agent:
+    build: .
+    image: smart-rag-agent:latest
+    container_name: smart-rag-agent
+    command: uvicorn server:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8000}:8000"
+    volumes:
+      # ALL persistent data under /app/data → ./data on host
+      - ${DATA_PATH:-./data}:/app/data              # sessions.db, feedback, traces, uploads, vector_db
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+    # ── Memory limits for 2GB ECS instances ────────────────
+    deploy:
+      resources:
+        limits:
+          memory: 1800M
+        reservations:
+          memory: 500M

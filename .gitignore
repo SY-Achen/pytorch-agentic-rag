@@ -1,6 +1,26 @@
+# Virtual environments & cache
 .venv/
-vector_db/
-data/
-.deepseek_key
 __pycache__/
 *.pyc
+*.pyo
+.cache/
+
+# Local data & databases (contains runtime user sessions & feedback)
+data/
+vector_db/
+chroma_db/
+uploads/
+*.db
+*.db-journal
+*.jsonl
+
+# Secret configs & API keys
+.env
+.env.local
+.deepseek_key
+
+# Attachments & temporary docs
+data_docs/
+*.zip
+.hermes/
+EOF

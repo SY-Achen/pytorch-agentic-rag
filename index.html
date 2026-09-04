@@ -1,159 +1,724 @@
-<!-- smart_ui.html — Enterprise RAG Single-Page UI -->
+<!-- smart_ui.html — Enterprise RAG Single-Page UI (v2) -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <title>智链星图 · 企业智能问答</title>
-    <!-- Lazy loading via CDN (Tailwind CSS) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Custom Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
         .msg-container::-webkit-scrollbar { height: 6px; }
         .msg-content pre { background: #f1f5f9; padding: 10px; border-radius: 5px; overflow-x: auto; font-size: 0.9em; }
+        .tab-btn.active { background: rgba(79,70,229,0.1); color: #4f46e5; border-bottom: 2px solid #4f46e5; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); }}
+        .pulse-green { animation: pulseG 1.5s infinite alternate; }
+        @keyframes pulseG { from { color:#22c55e; } to { color:#86efac; } }
+        .doc-item:hover { background: #f0f0ff; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen flex items-center justify-center text-slate-800">
 
     <!-- LOGIN SCREEN -->
     <div id="login-view" class="w-full max-w-md p-8 bg-white rounded-xl shadow-xl transition-all">
-        <h1 class="text-2xl font-bold mb-6 text-center text-indigo-600">🔐 智链星图 Access</h1>
-        <input id="username" type="text" placeholder="Username (zhangsan/lisi)" class="w-full px-4 py-2 border rounded-lg mb-3 focus:ring-2 focus:ring-indigo-400 outline-none">
-        <input id="password" type="password" placeholder="Password (123)" class="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-400 outline-none">
-        <button onclick="doLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition-colors">Sign In</button>
-        <p class="mt-4 text-xs text-gray-400 text-center">Demo Accounts: zhangsan(sales)/lisi(engineering)/wangwu(admin)</p>
+        <h1 class="text-2xl font-bold mb-6 text-center text-indigo-600">🔐 智链星图 登录</h1>
+        <input id="username" type="text" placeholder="用户名（zhangsan/lisi）" class="w-full px-4 py-2 border rounded-lg mb-3 focus:ring-2 focus:ring-indigo-400 outline-none">
+        <input id="password" type="password" placeholder="密码（123）" class="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-400 outline-none">
+        <button onclick="doLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition-colors">登录</button>
+        <p class="mt-4 text-xs text-gray-400 text-center">演示账号：zhangsan(销售)/lisi(工程)/wangwu(管理员)</p>
+        <p class="mt-2 text-[11px] text-gray-400 text-center leading-relaxed">📌 数据集来源：AntSQL 金融语义解析数据集（蚂蚁财富 / 阿里云天池）<br>仅作系统内部技术验证与测试使用，未进行任何商业化</p>
     </div>
 
-    <!-- CHAT SCREEN -->
-    <div id="chat-view" class="hidden w-[90%] max-w-4xl h-[90vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden">
+    <!-- MAIN APP -->
+    <div id="chat-view" class="hidden w-[95%] max-w-6xl h-[92vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden">
         <!-- Top Bar -->
-        <div class="flex items-center justify-between p-4 border-b bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
-            <div>
-                <span class="font-bold text-lg">🤖 智链星图 Agent</span>
-                <span id="dept-badge" class="ml-3 px-2 py-0.5 bg-white/20 rounded text-sm">--</span>
+        <div class="flex items-center justify-between p-3 border-b bg-gradient-to-r from-indigo-600 to-purple-600 text-white shrink-0">
+            <div class="flex items-center gap-4">
+                <span class="font-bold text-lg">🤖 智链星图 助手</span>
+                <span id="dept-badge" class="px-2 py-0.5 bg-white/20 rounded text-sm">--</span>
+                <span id="system-dot" class="text-xs pulse-green hidden">● 在线</span>
             </div>
-            <button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded hover:bg-white/40">Logout</button>
-        </div>
-        
-        <!-- Messages Area -->
-        <div id="messages" class="flex-1 overflow-y-auto p-6 msg-container space-y-4 bg-gray-50">
-            <div class="text-center text-gray-400 text-sm mt-4">Welcome! You are accessing via <b id="user-display">Guest</b></div>
+            <div class="flex items-center gap-2">
+                <select id="nav-tabs" onchange="switchTab(this.value)" class="bg-white/20 text-white text-sm rounded px-2 py-1 appearance-none cursor-pointer outline-none">
+                    <option value="chat" style="color:#333">💬 对话</option>
+                    <option value="knowledge" style="color:#333">📚 知识库</option>
+                    <option value="history" style="color:#333">🕒 历史</option>
+                    <option value="ops" style="color:#333">🛠️ 运维日志</option>
+                    <option value="status" style="color:#333">⚙️ 系统</option>
+                </select>
+                <button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded hover:bg-white/40">退出</button>
+            </div>
         </div>
 
-        <!-- Upload Preview -->
-        <div id="preview-area" class="hidden px-6 pb-2 flex gap-2 items-center bg-gray-50 overflow-x-auto"></div>
+        <!-- ═══ TAB: Chat ═══ -->
+        <div id="tab-chat" class="tab-panel flex flex-col flex-1 min-h-0">
+            <div id="messages" class="flex-1 overflow-y-auto p-6 msg-container space-y-4 bg-gray-50">
+                <div class="text-center text-gray-400 text-sm mt-4">欢迎！当前登录用户：<b id="user-display">访客</b></div>
+            </div>
+            <div id="preview-area" class="hidden px-6 pb-2 flex gap-2 items-center bg-gray-50 overflow-x-auto"></div>
+            <div class="p-4 bg-white border-t shrink-0">
+                <div class="flex items-end gap-2">
+                    <!-- ponytail: image-upload UI removed — feature unused/broken -->
+                    <textarea id="msg-input" rows="2" class="flex-1 border rounded-lg px-4 py-2 resize-none focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="请输入问题..."></textarea>
+                    <button onclick="sendMessage()" id="send-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg">发送</button>
+                </div>
+                <div class="mt-2 text-center text-[11px] text-gray-400">
+                    数据源：AntSQL 中文金融语义解析基准（蚂蚁财富 & 阿里云天池）· 仅供技术验证与学术测试 · 未商业化
+                </div>
+            </div>
+        </div>
 
-        <!-- Input Area -->
-        <div class="p-4 bg-white border-t">
-            <div class="flex items-end gap-2">
-                <label class="cursor-pointer text-gray-400 hover:text-indigo-600 p-2">
-                    📎
-                    <input type="file" id="file-input" multiple class="hidden" onchange="handleFiles(this.files)">
-                </label>
-                <textarea id="msg-input" rows="2" class="flex-1 border rounded-lg px-4 py-2 resize-none focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="Ask anything..."></textarea>
-                <button onclick="sendMessage()" id="send-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg">Send</button>
+        <!-- ═══ TAB: Knowledge Management ═══ -->
+        <div id="tab-knowledge" class="tab-panel flex-1 hidden overflow-y-auto p-6 fade-in">
+            <div class="max-w-2xl mx-auto">
+                <h2 class="text-xl font-bold mb-4 text-indigo-600">📚 知识库管理</h2>
+                <!-- Upload Zone -->
+                <div id="upload-zone" class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-indigo-400 transition-colors cursor-pointer"
+                     onclick="document.getElementById('kb-upload').click()">
+                    <div class="text-4xl mb-3">📁</div>
+                    <p class="text-gray-500">点击或拖拽文件到此区域上传至知识库</p>
+                                        <p class="text-sm font-medium text-amber-600 mt-2">⚠️ 只能上传 Markdown（.md）文档</p>
+                                        <input type="file" id="kb-upload" class="hidden" accept=".md,text/markdown" onchange="uploadKnowledge(this)">
+                </div>
+                <div id="upload-status" class="mt-3 text-sm text-indigo-600 hidden"></div>
+                <div id="upload-progress-wrap" class="mt-2 hidden">
+                    <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                        <div id="upload-progress-bar" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style="width:0%"></div>
+                    </div>
+                    <div id="upload-progress-text" class="text-xs text-gray-500 mt-1">0%</div>
+                </div>
+
+                <!-- 种子文档 -->
+                <h3 class="text-lg font-semibold mt-8 mb-3 flex items-center gap-2">🌱 种子文档 (<span id="seed-count">0</span>)</h3>
+                <div id="seed-list" class="space-y-2"></div>
+
+                <!-- 用户上传 -->
+                <h3 class="text-lg font-semibold mt-6 mb-3 flex items-center gap-2">📤 用户上传 (<span id="upload-count">0</span>)</h3>
+                <div id="upload-list" class="space-y-2"></div>
+                <button onclick="loadKnowledgeList()" class="mt-4 text-sm text-indigo-600 hover:underline">↻ 刷新列表</button>
+            </div>
+        </div>
+
+        <!-- ═══ TAB: History ═══ -->
+        <div id="tab-history" class="tab-panel flex-1 hidden overflow-y-auto p-6 fade-in">
+            <div class="max-w-3xl mx-auto">
+                <h2 class="text-xl font-bold mb-4 text-indigo-600">🕒 对话历史</h2>
+                <div class="flex gap-2 mb-4">
+                    <input id="history-user-filter" type="text" placeholder="按用户名筛选..." class="border rounded-lg px-3 py-1 text-sm flex-1 outline-none focus:ring-2 focus:ring-indigo-400">
+                    <button onclick="loadHistory()" class="bg-indigo-600 text-white px-4 py-1 rounded-lg text-sm hover:bg-indigo-700">搜索</button>
+                </div>
+                <div id="history-list" class="space-y-3"></div>
+                <button onclick="loadHistory()" class="mt-4 text-sm text-indigo-600 hover:underline">↻ 刷新</button>
+            </div>
+        </div>
+
+        <!-- ═══ TAB: Ops Trace ═══ -->
+        <div id="tab-ops" class="tab-panel flex-1 hidden overflow-y-auto p-6 fade-in">
+            <div class="max-w-3xl mx-auto">
+                <h2 class="text-xl font-bold mb-2 text-indigo-600">🛠️ 运维日志</h2>
+                <div id="ops-meta" class="text-sm text-gray-600 mb-3 bg-white border rounded-lg p-3">模型与接口地址将在登录/问答后显示</div>
+                <div class="flex gap-2 mb-3">
+                    <button onclick="clearTracePanel()" class="text-sm px-3 py-1 border rounded hover:bg-gray-50">清空</button>
+                    <button onclick="refreshOpsMeta()" class="text-sm px-3 py-1 bg-indigo-600 text-white rounded">刷新模型信息</button>
+                </div>
+                <pre id="trace-panel" class="bg-slate-900 text-green-300 text-xs p-4 rounded-lg h-[28rem] overflow-auto whitespace-pre-wrap"></pre>
+            </div>
+        </div>
+
+        <!-- ═══ TAB: System Status ═══ -->
+        <div id="tab-status" class="tab-panel flex-1 hidden overflow-y-auto p-6 fade-in">
+            <div class="max-w-2xl mx-auto">
+                <h2 class="text-xl font-bold mb-4 text-indigo-600">⚙️ 系统状态监控</h2>
+                <div id="status-grid" class="grid grid-cols-2 gap-4 mb-6"></div>
+                <button onclick="loadSystemStatus()" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">🔄 刷新状态</button>
             </div>
         </div>
     </div>
 
-    <script>
-        let currentUser = null;
-        let attachments = []; // Stores base64 strings
+<script>
+let currentUser = null;
+let attachments = [];
+let currentTraceId = null;
+let currentModelInfo = {model:"", base_url:""};
 
-        async function doLogin() {
-            const u = document.getElementById('username').value;
-            const p = document.getElementById('password').value;
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: u, password: p})
-                });
-                const data = await res.json();
-                if (data.success) {
-                    currentUser = data.user_info;
-                    showChatUI();
-                } else {
-                    alert(data.error);
-                }
-            } catch(e) { alert("Server Error"); }
+const API = ''; // relative path
+
+// ─── Login ──────────────────────────────────────────────────
+async function doLogin() {
+    const u = document.getElementById('username').value;
+    const p = document.getElementById('password').value;
+    try {
+        const res = await fetch(API + '/api/login', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username: u, password: p})
+        });
+        const data = await res.json();
+        if (data.success) {
+            localStorage.setItem('rag_token', data.token);
+            currentUser = data.user_info;
+            showChatUI();
+        } else { alert(data.error); }
+    } catch(e) { alert("服务器错误"); }
+}
+
+function showChatUI() {
+    document.getElementById('login-view').classList.add('hidden');
+    document.getElementById('chat-view').classList.remove('hidden');
+    document.getElementById('user-display').innerText = currentUser.name;
+    document.getElementById('dept-badge').innerText = currentUser.dept + " 部门";
+    document.getElementById('system-dot').classList.remove('hidden');
+    loadSystemStatus();
+    refreshOpsMeta();
+}
+
+function logout() { location.reload(); }
+
+// ─── Tab Switching ──────────────────────────────────────────
+function switchTab(tab) {
+    document.querySelectorAll('.tab-panel').forEach(el => el.classList.add('hidden'));
+    document.getElementById('tab-' + tab).classList.remove('hidden');
+    if (tab === 'knowledge') loadKnowledgeList();
+    if (tab === 'history') loadHistory();
+    if (tab === 'status') loadSystemStatus();
+    if (tab === 'ops') refreshOpsMeta();
+}
+
+// ─── Chat ───────────────────────────────────────────────────
+let currentSessionId = null; // id of latest completed conversation
+// ponytail: currentTraceId already declared at top with currentModelInfo
+
+// Append a chat message bubble
+function appendMsg(sender, html, extra='') {
+    const c = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = sender === 'You' ? 'text-right mb-4' : 'text-left mb-4';
+    const bg = sender === 'You' ? 'bg-indigo-600 text-white' : 'bg-white border';
+    const align = sender === 'You' ? 'flex justify-end' : 'flex';
+    div.innerHTML = `
+        <div class="${align}">
+            <div class="inline-block max-w-[85%] ${bg} rounded-lg p-3 shadow-sm fade-in ${sender==='You'?'rounded-br-none':'rounded-tl-none'}">
+                <div class="text-xs opacity-75 mb-1">${sender}</div>
+                <div class="msg-content text-sm whitespace-pre-wrap leading-relaxed">${html}${extra}</div>
+            </div>
+        </div>`;
+    c.appendChild(div);
+    c.scrollTop = c.scrollHeight;
+}
+
+// Append an agent message with feedback buttons + citations
+function appendMsgWithFeedback(sender, reply, extra='', sources=[], traceId='') {
+    const c = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = 'text-left mb-4';
+    div.innerHTML = `
+        <div class="flex">
+            <div class="inline-block max-w-[85%] bg-white border rounded-lg p-3 shadow-sm fade-in rounded-tl-none">
+                <div class="text-xs opacity-75 mb-1">${sender}</div>
+                <div class="msg-content text-sm whitespace-pre-wrap leading-relaxed">${escapeHtml(reply)}${extra}</div>
+                <div id="sources-area-${c.children.length}" class="mt-2"></div>
+                <div id="feedback-actions-${c.children.length}" class="hidden mt-2 flex gap-2 items-center">
+                    <button class="text-xs hover:bg-green-50 px-2 py-0.5 rounded" onclick="submitFeedback(${c.children.length+999}, true, this)">👍</button>
+                                        <button class="text-xs hover:bg-red-50 px-2 py-0.5 rounded" onclick="submitFeedback(${c.children.length+999}, false, this)">👎</button>
+                </div>
+            </div>
+        </div>`;
+    c.appendChild(div);
+    c.scrollTop = c.scrollHeight;
+
+    // Store session info for feedback
+    if (traceId) {
+        fetch(API + '/api/session/history?limit=1').then(r=>r.json()).then(data=>{
+            if(data.success && data.sessions?.length){
+                const sid = data.sessions[0].id;
+                div.querySelector(`#feedback-actions-${c.children.length}`).classList.remove('hidden');
+                div.querySelectorAll('button').forEach(b=>b.setAttribute('onclick', b.textContent.includes('👍')?`submitFeedback(${sid},true,this)`: `submitFeedback(${sid},false,this)`));
+            }
+        }).catch(()=>{});
+    }
+
+    // Render citations if any
+    if (sources.length > 0) {
+        const area = div.querySelector(`#sources-area-${c.children.length}`);
+        if (area) area.innerHTML = formatSources(formatCitations(sources));
+    }
+}
+
+function handleFiles(files) {
+    const previewArea = document.getElementById('preview-area');
+    previewArea.innerHTML = '';
+    previewArea.classList.remove('hidden');
+    attachments = [];
+    Array.from(files).forEach(f => {
+        if (!f.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const b64 = e.target.result;
+            attachments.push(b64);
+            const thumb = document.createElement('img');
+            thumb.src = b64;
+            thumb.className = "h-12 w-12 object-cover rounded border";
+            previewArea.appendChild(thumb);
+        };
+        reader.readAsDataURL(f);
+    });
+}
+
+async function sendMessage() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text && attachments.length === 0) return;
+
+    const token = localStorage.getItem('rag_token');
+    if (!token) {
+        alert("请先登录（Token未找到）");
+        return;
+    }
+
+    appendMsg('我', text, attachments.map(a => `<img src="${a}" class="max-h-32 block mt-1 rounded"/>`).join(''));
+    input.value = ''; attachments = [];
+    document.getElementById('preview-area').innerHTML = '';
+    document.getElementById('preview-area').classList.add('hidden');
+    document.getElementById('send-btn').disabled = true;
+
+    try {
+        const res = await fetch(API + '/api/chat', {
+            method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
+            body: JSON.stringify({
+                message: text, files: attachments
+            })
+        });
+
+        console.log('[Chat] status:', res.status);
+        if (res.status !== 200) {
+            appendMsg('系统', `❌ HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`, '');
+            document.getElementById('send-btn').disabled = false;
+            return;
         }
 
-        function showChatUI() {
-            document.getElementById('login-view').classList.add('hidden');
-            document.getElementById('chat-view').classList.remove('hidden');
-            document.getElementById('user-display').innerText = currentUser.name;
-            document.getElementById('dept-badge').innerText = currentUser.dept.toUpperCase() + " Dept";
+        // Detect SSE vs JSON by Content-Type header
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('text/event-stream')) {
+            streamToAgent(res);
+        } else {
+            const data = await res.json();
+            appendMsgWithFeedback('助手', data.reply, '', data.sources || []);
         }
+    } catch(e) { appendMsg('系统', '❌ 连接失败：' + e.message, ''); }
+    finally { document.getElementById('send-btn').disabled = false; }
+}
 
-        function logout() {
-            location.reload();
-        }
+// SSE stream renderer — typewriter effect
+function streamToAgent(response) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullReply = '';
 
-        function handleFiles(files) {
-            const previewArea = document.getElementById('preview-area');
-            previewArea.innerHTML = '';
-            previewArea.classList.remove('hidden');
-            attachments = [];
+    const c = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.className = 'text-left';
+    div.innerHTML = `
+        <div class="inline-block max-w-[85%] bg-white border rounded-lg p-4 shadow-sm rounded-t-xl fade-in agent-msg" id="stream-target">
+            <div class="flex justify-between items-center mb-1">
+                <div class="text-xs opacity-75">🤖 助手 · 生成中<span class="inline-block ml-2 px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-xs rounded typing-dot">●</span></div>
+            </div>
+            <div id="stream-text" class="msg-content whitespace-pre-wrap leading-relaxed text-sm"></div>
+            <div id="stream-status" class="mt-2 text-xs text-gray-400 hidden"></div>
+        </div>`;
+    c.appendChild(div);
+    c.scrollTop = c.scrollHeight;
 
-            Array.from(files).forEach(f => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const b64 = e.target.result;
-                    attachments.push(b64);
+    async function readStream() {
+        try {
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, {stream: true});
+                
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const jsonStr = line.slice(6);
+                    if (jsonStr === '[DONE]') continue;
                     
-                    const thumb = document.createElement('img');
-                    thumb.src = b64;
-                    thumb.className = "h-12 w-12 object-cover rounded border";
-                    previewArea.appendChild(thumb);
-                };
-                reader.readAsDataURL(f);
-            });
+                    try {
+                        const event = JSON.parse(jsonStr);
+                        
+                        if (event.type === 'start') {
+                            currentTraceId = event.trace_id || currentTraceId;
+                            if (event.model) currentModelInfo.model = event.model;
+                            if (event.base_url) currentModelInfo.base_url = event.base_url;
+                            appendTraceLine(`[开始] 模型=${event.model||currentModelInfo.model} 地址=${event.base_url||currentModelInfo.base_url} 追踪=${currentTraceId||''}`);
+                            refreshOpsMeta();
+                        } else if (event.type === 'trace') {
+                            const ec = event.error_code ? ` err=${event.error_code}` : '';
+                            appendTraceLine(`[${event.step||'step'}] ${event.status||''} ${event.ms||0}ms${ec}${event.tool?(' tool='+event.tool):''}${event.text?(' '+event.text):''}`);
+                        } else if (event.type === 'status') {
+                            const statusEl = document.getElementById('stream-status');
+                            statusEl.textContent = event.text;
+                            statusEl.classList.remove('hidden');
+                        } else if (event.type === 'chunk') {
+                            fullReply += event.text;
+                            document.getElementById('stream-text').innerHTML = formatSources(fullReply);
+                            c.scrollTop = c.scrollHeight;
+                        } else if (event.type === 'final_chunk') {
+                            // ponytail: treat as status only — do NOT append into answer body
+                            const statusEl = document.getElementById('stream-status');
+                            if (statusEl) { statusEl.textContent = event.text || ''; statusEl.classList.remove('hidden'); }
+                        } else if (event.type === 'sources') {
+                            // Store sources for display after done
+                            window._pendingSources = event.sources || [];
+                        } else if (event.type === 'done') {
+                            document.querySelector('.typing-dot').style.display = 'none';
+                            // ponytail: keep source count only in feedback footer, not Source# chips in body
+                            document.getElementById('stream-text').innerHTML = formatSources(fullReply);
+                        } else if (event.type === 'eof') {
+                            // Conversation complete — rebuild bubble, then attach real feedback buttons
+                            currentSessionId = null;
+                            const parent = document.getElementById('stream-text').parentElement;
+                            parent.innerHTML = `
+                                <div class="flex justify-between items-center mb-1">
+                                    <div class="text-xs opacity-75">🤖 助手 · 完成</div>
+                                </div>
+                                <div class="msg-content whitespace-pre-wrap leading-relaxed text-sm">${formatSources(fullReply)}</div>
+                            `;
+                            // ponytail: attach after rewrite so buttons aren't wiped / don't use null session_id
+                            addFeedbackButtons(div, fullReply, window._pendingSources || [], currentTraceId);
+                            const statusEl = document.getElementById('stream-status');
+                            if (statusEl) statusEl.classList.add('hidden');
+                            break;
+                        } else if (event.type === 'error') {
+                            fullReply += '\n[错误] ' + event.text;
+                            document.getElementById('stream-text').textContent = fullReply;
+                            addFeedbackButtons(div, fullReply, [], currentTraceId);
+                        }
+                    } catch(e) { /* skip malformed SSE */ }
+                }
+            }
+        } catch(e) {
+            document.getElementById('stream-text').textContent = fullReply + '\n[流中断]';
         }
+    }
+    readStream();
+}
 
-        async function sendMessage() {
-            const input = document.getElementById('msg-input');
-            const text = input.value.trim();
-            if (!text && attachments.length === 0) return;
+function formatCitations(sources) {
+    // ponytail: user asked to remove Source# labels entirely
+    return '';
+}
 
-            appendMsg('You', text, attachments.map(a => `<img src="${a}" class="max-h-32 block mt-1 rounded"/>`).join(''));
-            input.value = ''; attachments = [];
-            document.getElementById('preview-area').innerHTML = ''; document.getElementById('preview-area').classList.add('hidden');
-            document.getElementById('send-btn').disabled = true;
+function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+}
 
-            try {
-                const res = await fetch('/api/chat', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        message: text,
-                        files: attachments,
-                        username: currentUser.username || Object.keys(requireUserMap())[0], 
-                        dept: currentUser.dept
-                    })
-                });
-                const data = await res.json();
-                appendMsg('Agent', data.reply, '');
-            } catch(e) { appendMsg('System', 'Connection failed.', ''); } finally {
-                document.getElementById('send-btn').disabled = false;
+function addFeedbackButtons(msgDiv, reply, sources, traceId) {
+    const container = msgDiv.querySelector('.inline-block');
+    if (!container) return;
+    
+    // Get latest session ID from server history
+    fetch(API + '/api/session/history?limit=1&username=' + encodeURIComponent(currentUser.username))
+        .then(r => r.json())
+        .then(data => {
+            if (data.history && data.history.length > 0) {
+                const last = data.history[0];
+                currentSessionId = last.id;
+                
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'feedback-actions flex gap-2 mt-2 pt-2 border-t';
+                actionsDiv.innerHTML = `
+                    <button onclick="submitFeedback(${last.id}, true, this)" class="text-sm hover:bg-green-50 px-2 py-0.5 rounded transition-colors" title="有用">👍 有用</button>
+                    <button onclick="submitFeedback(${last.id}, false, this)" class="text-sm hover:bg-red-50 px-2 py-0.5 rounded transition-colors" title="无用">👎 无用</button>
+                    <span class="text-xs text-gray-400 ml-auto">${sources.length} 条引用 · ${traceId || ''}</span>
+                `;
+                container.appendChild(actionsDiv);
+            }
+        })
+        .catch(() => {}); // silently fail — feedback is nice-to-have
+}
+
+function renderMarkdown(text) {
+    // ponytail: tiny markdown — fixes visible \n and ** in answers
+    let s = escapeHtml(text || '');
+    s = s.replace(/^### (.+)$/gm, '<div class="font-semibold text-base mt-2 mb-1">$1</div>');
+    s = s.replace(/^## (.+)$/gm, '<div class="font-bold text-lg mt-2 mb-1">$1</div>');
+    s = s.replace(/^# (.+)$/gm, '<div class="font-bold text-xl mt-2 mb-1">$1</div>');
+    s = s.replace(/```([\s\S]*?)```/g, '<pre class="my-2"><code>$1</code></pre>');
+    s = s.replace(/`([^`]+)`/g, '<code class="px-1 bg-slate-100 rounded text-xs">$1</code>');
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/^[-*] (.+)$/gm, '<div class="ml-3">• $1</div>');
+    s = s.replace(/\n/g, '<br>');
+    return s;
+}
+
+function formatSources(html) {
+    // ponytail: strip Source#/Source #N completely, then markdown
+    let s = (html || '').replace(/\[?Source\s*#\s*\d+\]?:?/gi, '');
+    return renderMarkdown(s);
+}
+
+document.getElementById('msg-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+// ─── Knowledge Management ───────────────────────────────────
+function setUploadProgress(pct, msg) {
+    const wrap = document.getElementById('upload-progress-wrap');
+    const bar = document.getElementById('upload-progress-bar');
+    const text = document.getElementById('upload-progress-text');
+    if (!wrap || !bar || !text) return;
+    wrap.classList.remove('hidden');
+    bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    text.textContent = Math.round(pct) + '% · ' + (msg || '');
+}
+
+async function pollIngestProgress(jobId, statusEl) {
+    // ponytail: poll every 500ms until done/error
+    for (let i = 0; i < 240; i++) {
+        const res = await fetch(API + '/api/knowledge/ingest/' + encodeURIComponent(jobId));
+        const data = await res.json();
+        const pct = data.pct || 0;
+        setUploadProgress(pct, data.msg || data.status || '');
+        statusEl.textContent = (data.msg || data.status || 'processing...') + ' (' + pct + '%)';
+        if (data.status === 'done') {
+            statusEl.textContent = '✅ 入库完成：' + (data.chunks || 0) + ' 个分片';
+            statusEl.classList.remove('text-red-600');
+            statusEl.classList.add('text-indigo-600');
+            setUploadProgress(100, '完成');
+            loadKnowledgeList();
+            return;
+        }
+        if (data.status === 'error' || data.status === 'unknown') {
+            throw new Error(data.msg || 'ingest failed');
+        }
+        await new Promise(r => setTimeout(r, 500));
+    }
+    throw new Error('ingest timeout');
+}
+
+async function uploadKnowledge(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const status = document.getElementById('upload-status');
+    // ponytail: UI currently only accepts Markdown
+    if (!/\.md$/i.test(file.name)) {
+        status.textContent = '❌ 只能上传 Markdown（.md）文档';
+        status.classList.remove('hidden');
+        status.classList.add('text-red-600');
+        input.value = '';
+        return;
+    }
+    status.classList.remove('text-red-600');
+    status.classList.add('text-indigo-600');
+    status.textContent = '⏳ 上传中...';
+    status.classList.remove('hidden');
+    setUploadProgress(2, '上传文件...');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch(API + '/api/knowledge/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'queued' && data.job_id) {
+            status.textContent = '⚙️ 已入队，开始向量化...';
+            await pollIngestProgress(data.job_id, status);
+        } else if (data.status === 'queued') {
+            status.textContent = '✅ 已入队（无进度ID）';
+        } else {
+            throw new Error(data.detail || 'Unknown error');
+        }
+    } catch(e) {
+        status.textContent = '❌ 上传失败：' + e.message;
+        status.classList.add('text-red-600');
+        setUploadProgress(100, '失败');
+    }
+    loadKnowledgeList();
+    input.value = '';
+}
+
+async function loadKnowledgeList() {
+    try {
+        const res = await fetch(API + '/api/knowledge/list');
+        const data = await res.json();
+
+        // 种子文档
+        const seedCount = document.getElementById('seed-count');
+        seedCount.textContent = data.seeds.length;
+        const seedList = document.getElementById('seed-list');
+        seedList.innerHTML = data.seeds.map(d => `
+            <div class="doc-item flex justify-between items-center p-3 rounded border bg-gray-50">
+                <div class="flex items-center gap-2">
+                    <span class="text-lg">🌱</span>
+                    <span class="text-sm font-medium">${d.filename}</span>
+                    <span class="text-xs text-gray-400">${(d.size_bytes/1024).toFixed(1)} KB</span>
+                </div>
+                <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">种子文档</span>
+            </div>`).join('');
+
+        // 用户上传
+        const uploadCount = document.getElementById('upload-count');
+        uploadCount.textContent = data.uploaded.length;
+        const uploadList = document.getElementById('upload-list');
+        uploadList.innerHTML = data.uploaded.map(d => `
+            <div class="doc-item flex justify-between items-center p-3 rounded border bg-gray-50">
+                <div class="flex items-center gap-2">
+                    <span class="text-lg">📤</span>
+                    <span class="text-sm font-medium">${d.filename}</span>
+                    <span class="text-xs text-gray-400">${(d.size_bytes/1024).toFixed(1)} KB · ${d.chunks_added} 个分片 · ${d.uploaded_at?.slice(0,10)}</span>
+                </div>
+                <div class="flex gap-2">
+                    <span class="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">已上传</span>
+                    <button onclick="deleteDoc(${d.id})" class="text-xs text-red-600 hover:underline">删除</button>
+                </div>
+            </div>`).join('');
+    } catch(e) { console.error('Load knowledge failed:', e); }
+}
+
+async function deleteDoc(docId) {
+    if (!confirm('确定删除此文档记录？')) return;
+    try {
+        await fetch(`${API}/api/knowledge/${docId}`, { method: 'DELETE' });
+        loadKnowledgeList();
+    } catch(e) { alert('删除失败'); }
+}
+
+// ─── History ────────────────────────────────────────────────
+async function loadHistory() {
+    const userFilter = document.getElementById('history-user-filter').value.trim();
+    let url = API + '/api/session/history?limit=50';
+    if (userFilter) url += `&username=${encodeURIComponent(userFilter)}`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const list = document.getElementById('history-list');
+        if (!data.history || data.history.length === 0) {
+            list.innerHTML = '<div class="text-center text-gray-400 py-8">暂无对话记录。</div>';
+            return;
+        }
+        list.innerHTML = data.history.map(h => `
+            <div class="p-4 rounded-lg border bg-white shadow-sm fade-in">
+                <div class="flex justify-between items-start mb-2">
+                    <div class="flex gap-2 items-center">
+                        <span class="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">${h.username}</span>
+                        <span class="text-xs text-gray-400">${h.ts?.slice(0,19)}</span>
+                    </div>
+                </div>
+                <div class="text-sm"><b>Q:</b> ${h.question.slice(0,200)}</div>
+                <div class="text-sm mt-2 text-gray-600"><b>A:</b> ${h.answer.slice(0,300)}...</div>
+            </div>`).join('');
+    } catch(e) { console.error('Load history failed:', e); }
+}
+
+// ─── System Status ──────────────────────────────────────────
+
+function appendTraceLine(line) {
+    const el = document.getElementById('trace-panel');
+    if (!el) return;
+    el.textContent += line + '\n';
+    el.scrollTop = el.scrollHeight;
+}
+function clearTracePanel() {
+    const el = document.getElementById('trace-panel');
+    if (el) el.textContent = '';
+}
+async function refreshOpsMeta() {
+    try {
+        const res = await fetch(API + '/api/system/status');
+        const data = await res.json();
+        currentModelInfo = {model: data.model || '', base_url: data.base_url || ''};
+        const meta = document.getElementById('ops-meta');
+        if (meta) {
+            meta.innerHTML = `模型：<b>${data.model || '-'}</b><br>接口地址：<code>${data.base_url || '-'}</code><br>备用地址：<code>${data.fallback_base_url || '无'}</code><br>JWT鉴权：${data.jwt_auth ? '开' : '关'} · 最大步数：${data.max_agent_steps || '-'}`;
+        }
+    } catch(e) {}
+}
+
+async function loadSystemStatus() {
+    try {
+        const res = await fetch(API + '/api/system/status');
+        const data = await res.json();
+        const grid = document.getElementById('status-grid');
+        grid.innerHTML = `
+            ${cardBlock('Service', data.service, 'green')}
+            ${cardBlock('向量分片', data.total_chunks || '无', 'blue')}
+            ${cardBlock('模型', data.model || '无', 'purple')}
+            ${cardBlock('接口地址', (data.base_url||'').replace('https://','').slice(0,28) || '无', 'purple')}
+            ${cardBlock('DB Exists', data.db_exists ? '✅ Yes' : '❌ No', data.db_exists ? 'green' : 'red')}
+            ${cardBlock('Disk Free', data.disk_free_gb + ' GB', 'blue')}
+            ${cardBlock('种子文档', data.seed_docs || 0, 'blue')}
+            ${cardBlock('DB Dir', data.db_dir || 'unknown', 'gray')}
+        `;
+
+        // Usage stats
+        try {
+            const usage = await fetch(API + '/api/usage/stats').then(r=>r.json());
+            grid.innerHTML += `
+                ${cardBlock('总提问数', usage.total_queries || 0, 'purple')}
+                ${cardBlock('今日提问', usage.today_queries || 0, 'purple')}`;
+        } catch {}
+    } catch(e) { console.error('Load status failed:', e); }
+}
+
+// ─── Human Feedback (Thumbs Up / Down) ──────────────────────
+async function submitFeedback(sessionId, thumbsUp, btn) {
+    try {
+        if (sessionId == null) throw new Error('missing session_id');
+        const wrap = btn ? btn.closest('.feedback-actions') : null;
+        const prev = wrap ? wrap.dataset.fb : '';
+        // ponytail: click same rating again => cancel; click other => switch
+        const next = (prev === String(thumbsUp)) ? null : thumbsUp;
+        const res = await fetch(API + '/api/feedback', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                username: currentUser.username,
+                session_id: sessionId,
+                thumbs_up: next
+            })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        if (wrap) {
+            wrap.dataset.fb = next === null ? '' : String(next);
+            wrap.querySelectorAll('button').forEach(b => b.classList.remove('bg-green-100','bg-red-100'));
+            const tip = wrap.querySelector('.fb-ok');
+            if (tip) tip.remove();
+            if (next === true && btn) {
+                btn.classList.add('bg-green-100');
+                wrap.insertAdjacentHTML('beforeend', '<span class="fb-ok text-xs text-gray-400 ml-2">已记录有用 ✓（再点可取消）</span>');
+            } else if (next === false && btn) {
+                btn.classList.add('bg-red-100');
+                wrap.insertAdjacentHTML('beforeend', '<span class="fb-ok text-xs text-gray-400 ml-2">已记录无用 ✓（再点可取消）</span>');
+            } else {
+                wrap.insertAdjacentHTML('beforeend', '<span class="fb-ok text-xs text-gray-400 ml-2">已取消</span>');
+                setTimeout(() => { const t = wrap.querySelector('.fb-ok'); if (t) t.remove(); }, 1200);
             }
         }
+    } catch(e) {
+        console.error('Feedback failed:', e);
+        alert('反馈提交失败');
+    }
+}
 
-        function appendMsg(role, text, imgHtml) {
-            const c = document.getElementById('messages');
-            const div = document.createElement('div');
-            div.className = role === 'You' ? 'text-right' : 'text-left';
-            div.innerHTML = `
-                <div class="inline-block max-w-[80%] ${role === 'You' ? 'bg-indigo-600 text-white' : 'bg-white border rounded-lg p-4 shadow-sm'} rounded-t-xl">
-                    <div class="text-xs opacity-75 mb-1">${role} • ${new Date().toLocaleTimeString()}</div>
-                    <div class="msg-content whitespace-pre-wrap">${text}</div>
-                    ${imgHtml}
-                </div>`;
-            c.appendChild(div);
-            c.scrollTop = c.scrollHeight;
-        }
-
-        // Simple mapping to get username string from global state (since Pydantic expects strict types)
-        const requireUserMap = () => ({username: currentUser.username || 'default'});
-    </script>
+function cardBlock(label, value, color) {
+    const colors = {
+        green: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+        red: 'bg-red-50 border-red-200 text-red-700',
+        blue: 'bg-blue-50 border-blue-200 text-blue-700',
+        purple: 'bg-purple-50 border-purple-200 text-purple-700',
+        gray: 'bg-gray-50 border-gray-200 text-gray-700'
+    };
+    const cls = colors[color] || colors.gray;
+    return `<div class="p-4 rounded-lg border ${cls}">
+        <div class="text-xs uppercase tracking-wide opacity-75">${label}</div>
+        <div class="text-2xl font-bold mt-1">${typeof value === 'number' ? '' : value}${typeof value === 'number' ? (value>=1000?' '+Number(value/1000).toFixed(1)+'k':value) : ''}</div>
+    </div>`;
+}
+</script>
 </body>
 </html>

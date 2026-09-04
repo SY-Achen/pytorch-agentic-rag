@@ -1,7 +1,19 @@
-# requirements.txt
-sentence-transformers>=2.7
-chromadb>=0.5
-langgraph>=0.2
-langchain-openai>=0.2
-beautifulsoup4>=4.12
+# RAG Agent — minimal requirements for deployment (ponytail)
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+pydantic>=2.0
+
+# Vector DB & Embeddings
+chromadb>=0.5,<1
+sentence-transformers>=2.7,<4
+
+# HTTP client (for LLM API calls + web search fallback)
 requests>=2.31
+
+# DuckDuckGo search (lazy-loaded in tool_search_web)
+duckduckgo-search>=6.0
+
+# Auth / Env
+bcrypt>=4.1
+python-dotenv>=1.0

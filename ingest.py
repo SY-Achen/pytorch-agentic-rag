@@ -26,10 +26,22 @@ def load_docs(data_dir: str) -> list[str]:
 def main(data_dir: str = "data", db_dir: str = "vector_db"):
     docs = load_docs(data_dir)
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n## ", "\n### ", "\n\n", "\n", " "],
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        # Priority order: code fences > sub-section headers > blank paragraphs > line breaks > words
+        separators=[
+            "\n```",     # ① 代码块边界（前后各留几行上下文）
+            "\n```py",   # Python 代码标记（更精确）
+            "\n#",      # 任何级别的 Markdown 标题（# ## ### ####）
+            "\n\n",     # 空段落
+            "\n",       # 换行
+            " ",        # 单词间空格
+            "",         # 字符级兜底
+        ],
     )
-    chunks = splitter.split_text("\n\n".join(docs))
+    chunks = []
+    for doc in docs:
+        chunks.extend(splitter.split_text(doc))
     print(f"  {len(docs)} docs -> {len(chunks)} chunks")
 
     model = SentenceTransformer(EMB_MODEL)
