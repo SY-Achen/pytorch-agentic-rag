@@ -352,9 +352,10 @@ def _local_retrieve(query: str, metadata_filter=None, top_k: int = 5, distance_t
         if coll.count() == 0:
             return "[EMPTY] Vector DB is empty."
         q_emb = m.encode([query], normalize_embeddings=True).tolist()
+        candidate_k = min(max(top_k * 4, 20), coll.count())
         res = coll.query(
             query_embeddings=q_emb,
-            n_results=min(top_k, coll.count()),
+            n_results=candidate_k,
             where=metadata_filter,
             include=["documents", "metadatas", "distances"]
         )
@@ -367,8 +368,18 @@ def _local_retrieve(query: str, metadata_filter=None, top_k: int = 5, distance_t
         if not valid_pairs:
             return "[EMPTY] No matching documents above similarity threshold."
 
+        # ponytail: light-weight reranker (exact phrase match + dense score)
+        # ponytail: only rerank candidates that passed the similarity gate
+        q_words = set(re.findall(r'[\u4e00-\u9fff\w]+', query.lower()))
+        scored_pairs = []
+        for d, meta, _dist in valid_pairs:
+            text_lower = d.lower()
+            exact_hits = sum(1.5 for w in q_words if w in text_lower)
+            scored_pairs.append((exact_hits, d, meta))
+        scored_pairs.sort(key=lambda x: x[0], reverse=True)
+
         parts = []
-        for i, (d, meta, dist) in enumerate(valid_pairs, 1):
+        for i, (_, d, meta) in enumerate(scored_pairs[:top_k], 1):
             src_meta = meta if isinstance(meta, dict) else {}
             doc_name = src_meta.get("source", src_meta.get("filename", "未知文档"))
             dept = src_meta.get("dept", "通用")
@@ -767,8 +778,11 @@ async def rag_chat_stream(req: ChatRequest, request: Request):
     try:
         coll = _get_chroma_collection()
         sample = coll.get(limit=min(50, coll.count()))
-        docs_with_meta = sum(1 for m in (sample.get("metadatas") or []) if isinstance(m, dict) and len(m) > 0)
-        has_meta = docs_with_meta > 25
+        metadatas = sample.get("metadatas") or []
+        has_meta = any(
+            isinstance(m, dict) and ("visibility" in m or "dept" in m)
+            for m in metadatas
+        )
         
         if has_meta:
             metadata_filter = {"$and": [
@@ -860,7 +874,11 @@ def rag_chat(req: ChatRequest):
     try:
         coll = _get_chroma_collection()
         sample = coll.get(limit=min(50, coll.count()))
-        has_meta = sum(1 for m in (sample.get("metadatas") or []) if isinstance(m, dict) and len(m) > 0) > 25
+        metadatas = sample.get("metadatas") or []
+        has_meta = any(
+            isinstance(m, dict) and ("visibility" in m or "dept" in m)
+            for m in metadatas
+        )
         if has_meta:
             metadata_filter = {"$and": [
                 {"visibility": {"$gte": 0}},
