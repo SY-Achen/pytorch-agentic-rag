@@ -20,7 +20,9 @@ def structured_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
     for line in text.splitlines():
         line = line.rstrip()
         is_heading = line.startswith("#")
-        is_table_row = line.startswith("|") and not set(line.replace("|", "").replace("-", "").replace(":", "").strip())
+        if line.startswith("|") and all(ch in "|-: \t" for ch in line):
+            continue
+        is_table_row = line.startswith("|")
         if is_heading and current:
             blocks.append("\n".join(current).strip())
             current = []
@@ -40,7 +42,7 @@ def structured_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
         # Keep table/schema rows intact; only long prose is windowed.
         step = max(1, chunk_size - CHUNK_OVERLAP)
         chunks.extend(block[i:i + chunk_size] for i in range(0, len(block), step))
-    return [c for c in chunks if len(c.strip()) >= 20]
+    return [c for c in chunks if c.strip() and (c.startswith("|") or len(c.strip()) >= 20)]
 
 def load_docs(data_dir: str) -> list[str]:
     docs = []

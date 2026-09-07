@@ -1243,6 +1243,28 @@ def usage_stats():
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
+@app.get("/api/evaluation/latest")
+def evaluation_latest():
+    """Return latest strict benchmark and failed cases for the UI loop."""
+    path = APP_DIR / "eval_results_strict.json"
+    if not path.exists():
+        path = BASE_DATA_DIR / "eval_results_strict.json"
+    if not path.exists():
+        return {"status": "unavailable", "message": "暂无评测结果"}
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        failures = []
+        for row in report.get("results", []):
+            if row.get("route_ok") is False or row.get("keywords_all") is False or row.get("memory_ok") is False:
+                failures.append({
+                    "id": row.get("id"), "category": row.get("category"),
+                    "expected": row.get("expected"), "actual": row.get("actual"),
+                    "sources": row.get("sources", 0), "reply": str(row.get("reply", ""))[:240]
+                })
+        return {"status": "ok", "summary": report.get("summary", {}), "failures": failures}
+    except Exception:
+        return {"status": "error", "message": "评测结果读取失败"}
+
 # ── Serve UI ────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def index(response: Response):

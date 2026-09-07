@@ -66,6 +66,7 @@
                     <option value="history" style="color:#333">🕒 历史</option>
                     <option value="ops" style="color:#333">🛠️ 运维日志</option>
                     <option value="status" style="color:#333">⚙️ 系统</option>
+                    <option value="evaluation" style="color:#333">📊 评测闭环</option>
                 </select>
                 <button onclick="logout()" class="text-xs bg-white/20 px-3 py-1 rounded hover:bg-white/40">退出</button>
             </div>
@@ -154,6 +155,22 @@
                 <button onclick="loadSystemStatus()" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">🔄 刷新状态</button>
             </div>
         </div>
+
+        <!-- ═══ TAB: Evaluation Loop ═══ -->
+        <div id="tab-evaluation" class="tab-panel flex-1 hidden overflow-y-auto p-6 fade-in">
+            <div class="max-w-4xl mx-auto">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-indigo-600">📊 评测闭环</h2>
+                    <button onclick="loadEvaluation()" class="bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700">刷新评测</button>
+                </div>
+                <p id="evaluation-note" class="text-xs text-gray-500 mb-4">读取最近一次真实云端评测结果。</p>
+                <div id="evaluation-grid" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6"></div>
+                <div class="bg-white border rounded-lg overflow-hidden">
+                    <div class="px-4 py-3 font-semibold border-b">失败样本（下一轮优化依据）</div>
+                    <div id="evaluation-failures" class="divide-y text-sm"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
 <script>
@@ -202,6 +219,7 @@ function switchTab(tab) {
     if (tab === 'history') loadHistory();
     if (tab === 'status') loadSystemStatus();
     if (tab === 'ops') refreshOpsMeta();
+    if (tab === 'evaluation') loadEvaluation();
 }
 
 // ─── Chat ───────────────────────────────────────────────────
@@ -683,6 +701,43 @@ async function loadSystemStatus() {
                 ${cardBlock('今日提问', usage.today_queries || 0, 'purple')}`;
         } catch {}
     } catch(e) { console.error('Load status failed:', e); }
+}
+
+async function loadEvaluation() {
+    const grid = document.getElementById('evaluation-grid');
+    const failures = document.getElementById('evaluation-failures');
+    const note = document.getElementById('evaluation-note');
+    if (!grid || !failures || !note) return;
+    try {
+        const data = await fetch(API + '/api/evaluation/latest').then(r => r.json());
+        if (data.status !== 'ok') {
+            note.textContent = data.message || '暂无评测结果';
+            failures.innerHTML = '<div class="p-4 text-gray-500">暂无失败样本</div>';
+            return;
+        }
+        const s = data.summary || {};
+        const pct = v => typeof v === 'number' ? (v * 100).toFixed(1) + '%' : '-';
+        grid.innerHTML = [
+            cardBlock('金融召回命中率', pct(s.financial_recall_hit_rate), 'blue'),
+            cardBlock('关键词准确率', pct(s.financial_keyword_accuracy), 'purple'),
+            cardBlock('记忆通过率', pct(s.memory_pass_rate), 'green'),
+            cardBlock('缓存命中率', pct(s.cache_hit_rate), 'green'),
+            cardBlock('计算器路由', pct(s.calculator_route_accuracy), 'blue'),
+            cardBlock('通用路由', pct(s.general_route_accuracy), 'gray'),
+            cardBlock('注入拦截', pct(s.injection_block_rate), 'red'),
+            cardBlock('平均耗时', (s.avg_elapsed_ms || 0).toFixed(1) + ' ms', 'gray')
+        ].join('');
+        const rows = data.failures || [];
+        failures.innerHTML = rows.length ? rows.map(x => `
+            <div class="p-3">
+                <div class="font-medium">#${x.id} · ${x.category || '-'}</div>
+                <div class="text-xs text-gray-500 mt-1">预期：${x.expected || '-'} ｜ 实际：${x.actual || '-'} ｜ 引用：${x.sources || 0}</div>
+                <div class="text-xs text-red-600 mt-1">${escapeHtml(x.reply || '未返回回答')}</div>
+            </div>`).join('') : '<div class="p-4 text-green-600">当前没有失败样本</div>';
+        note.textContent = `真实评测样本：${s.dataset_cases || '-'} 条；失败样本：${rows.length} 条。失败结果直接作为下一轮 RAG 优化输入。`;
+    } catch (e) {
+        note.textContent = '评测接口暂时不可用';
+    }
 }
 
 // ─── Human Feedback (Thumbs Up / Down) ──────────────────────
