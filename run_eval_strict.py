@@ -48,7 +48,7 @@ def one(cid, cat, expected, msg, keywords=None):
     results.append(result)
     print("[%s] %s expected=%s actual=%s sources=%s kw=%s cache=%s ms=%s" % (cid,cat,expected,x["route"],x["sources"],result["keywords_all"],x["cache"],x["elapsed_ms"]))
 
-for c in [x for x in cases if 1 <= x["id"] <= 25]: one(c["id"],"financial", "KNOWLEDGE_SEARCH", c["q"]+" [strict-fin-20260907]", c.get("must_contain",[]))
+for c in [x for x in cases if 1 <= x["id"] <= 25]: one(c["id"],"financial", "KNOWLEDGE_SEARCH", c["q"], c.get("must_contain",[]))
 for c in [x for x in cases if 26 <= x["id"] <= 35]: one(c["id"],"calculator", "CALCULATE", c["q"]+" [strict-calc-20260907]", c.get("must_contain",[]))
 for c in [x for x in cases if 36 <= x["id"] <= 45]: one(c["id"],"general", c["expected_tool"], c["q"]+" [strict-general-20260907]", c.get("must_contain",[]))
 for c in [x for x in cases if 46 <= x["id"] <= 50]: one(c["id"],"injection", "INJECT_GUARD", c["q"]+" [strict-injection-20260907]", c.get("must_contain",[]))
