@@ -1,0 +1,38 @@
+# Python & Environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.cache/
+
+# Local databases, data directories & runtime logs
+data/
+vector_db/
+chroma_db/
+uploads/
+data_docs/
+*.db
+*.db-journal
+*.jsonl
+eval_results*.json
+trace_report.json
+
+# Private Interview & Internal Review docs
+interview_*.md
+*interview*.md
+*ROADMAP*.md
+EVAL_REPORT.md
+docs/private/
+
+# Secret configs & API keys
+.env
+.env.local
+.deepseek_key
+
+# Temporary artifacts
+*.zip
+.hermes/
+
+# Local model & embedding caches (do not push weights to GitHub)
+models_cache/
+models/
