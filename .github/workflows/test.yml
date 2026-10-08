@@ -21,4 +21,4 @@ jobs:
       - name: Compile backend
         run: python -m py_compile server.py seed_ingest.py
       - name: Run offline regression tests
-        run: python -m pytest -q test_multi_format.py test_trace_eval.py test_access_control.py test_llm_clean.py test_caption.py test_agent_regression.py test_user_auth.py test_governance.py test_admin_upload.py test_taxonomy_filters.py test_seed_metadata.py test_rerank.py test_authz_boundaries.py
+        run: BASE_DATA_DIR=.ci-data DB_DIR=.ci-data/vector_db python -m pytest -q test_multi_format.py test_trace_eval.py test_access_control.py test_llm_clean.py test_caption.py test_agent_regression.py test_user_auth.py test_governance.py test_admin_upload.py test_taxonomy_filters.py test_seed_metadata.py test_rerank.py test_authz_boundaries.py
