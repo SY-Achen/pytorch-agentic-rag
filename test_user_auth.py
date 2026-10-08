@@ -13,11 +13,17 @@ def test_register_then_login_ok(tmp_path):
     reg = server.register(server.RegisterRequest(
         username="student001", password="exam123", name="王同学", dept="education"))
     assert reg.get("success") is True
-    # login must resolve through the users table, not MOCK_USERS
+    # New registrations require administrator approval before login.
     resp = server.login(req)
-    assert resp.get("success") is True
-    assert resp["user_info"]["username"] == "student001"
-    assert resp["user_info"]["dept"] == "education"
+    assert resp.status_code == 403
+
+
+def test_seeded_users_have_governance_metadata(tmp_path):
+    _reset_db(tmp_path)
+    for username, role in (("wangwu", "admin"), ("zhangsan", "student"), ("lisi", "student")):
+        user = server._user_from_db(username)
+        assert user["role"] == role
+        assert user["status"] == "approved"
 
 
 def test_duplicate_username_rejected(tmp_path):

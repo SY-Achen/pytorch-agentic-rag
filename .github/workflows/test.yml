@@ -1,0 +1,24 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install fastapi "uvicorn[standard]" python-multipart pydantic chromadb sentence-transformers requests duckduckgo-search bcrypt python-dotenv pypdf python-docx pymupdf pytest
+      - name: Compile backend
+        run: python -m py_compile server.py seed_ingest.py
+      - name: Run offline regression tests
+        run: python -m pytest -q test_multi_format.py test_trace_eval.py test_access_control.py test_llm_clean.py test_caption.py test_agent_regression.py test_user_auth.py test_governance.py test_admin_upload.py test_taxonomy_filters.py test_seed_metadata.py test_rerank.py test_authz_boundaries.py

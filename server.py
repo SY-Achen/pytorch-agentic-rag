@@ -18,6 +18,43 @@ from pydantic import BaseModel
 from concurrent.futures import ThreadPoolExecutor
 import bcrypt  # ponytail: bcrypt over plain-text for production auth
 
+
+def _parse_cors_origins(value: str) -> list[str]:
+    """Comma-separated origin allowlist; wildcard is deliberately rejected."""
+    return [x.strip().rstrip("/") for x in (value or "").split(",") if x.strip() and x.strip() != "*"]
+
+
+def _document_taxonomy(course="", chapter="", topic="", source_url="", license_name="", version="") -> dict:
+    return {"course": course.strip(), "chapter": chapter.strip(), "topic": topic.strip(),
+            "source_url": source_url.strip(), "license": license_name.strip(), "version": version.strip()}
+
+
+def _seed_metadata(source, course="", chapter="", source_url="", license_name="", version="") -> dict:
+    meta = {"source": source, "type": "seed", "access": "public", "owner": "", "allowed_users": ""}
+    meta.update(_document_taxonomy(course, chapter, chapter, source_url, license_name, version))
+    return meta
+
+
+def _merge_where_filters(base_filter=None, course="", chapter="") -> dict | None:
+    clauses = []
+    if base_filter:
+        clauses.extend(base_filter.get("$and", [base_filter]))
+    if course:
+        clauses.append({"course": course})
+    if chapter:
+        clauses.append({"chapter": chapter})
+    if not clauses:
+        return None
+    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+
+
+def _can_use_service(user: dict | None) -> bool:
+    return bool(user and user.get("status", "approved") == "approved")
+
+
+def _is_admin(user: dict | None) -> bool:
+    return bool(_can_use_service(user) and user.get("role") == "admin")
+
 # ── Education taxonomy ─────────────────────────────────────
 COURSE_CATALOG = {
     "数据结构": ["线性表", "栈和队列", "树", "图", "查找", "排序"],
@@ -148,19 +185,17 @@ def _jwt_decode(token: str) -> dict | None:
         return None
 
 def _parse_auth_user(auth_header: str, body_username: str = "") -> str:
-    """Bearer JWT preferred; legacy session_<user>_<ts> still accepted."""
-    if body_username:
-        return body_username
+    """Return identity only from a valid signed bearer JWT; never trust request bodies."""
     if not auth_header.startswith("Bearer "):
         return ""
-    raw = auth_header[7:].strip()
-    payload = _jwt_decode(raw)
-    if payload and payload.get("sub"):
-        return payload["sub"]
-    parts = raw.split("_")
-    if len(parts) >= 3 and parts[0] == "session":
-        return parts[1]
-    return ""
+    payload = _jwt_decode(auth_header[7:].strip())
+    return str(payload.get("sub", "")) if payload else ""
+
+
+def _admin_from_request(request: Request):
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    user = _user_from_db(username)
+    return user if _is_admin(user) else None
 
 def _trace(trace_id: str, step: str, status: str = "ok", ms: int = 0, error_code: str = "", **extra):
     ev = {"ts": datetime.now().isoformat(timespec="seconds"), "step": step, "status": status,
@@ -273,7 +308,8 @@ MOCK_USERS = {
 }
 
 app = FastAPI(title="企业知识库 Agentic RAG 智能问答系统 v3")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+CORS_ORIGINS = _parse_cors_origins(os.environ.get("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"))
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Authorization", "Content-Type"])
 if STATIC_DIR.exists():
     app.mount("/uploads", StaticFiles(directory=str(STATIC_DIR)), name="uploads")
 
@@ -297,22 +333,32 @@ def _init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS knowledge (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         filename TEXT UNIQUE, filepath TEXT, size_bytes INTEGER,
-        chunks_added INTEGER, uploaded_at TEXT, course TEXT, chapter TEXT)""")
-    for col in ("course", "chapter"):
+        chunks_added INTEGER, uploaded_at TEXT, course TEXT, chapter TEXT,
+        topic TEXT DEFAULT '', source_url TEXT DEFAULT '', license TEXT DEFAULT '', version TEXT DEFAULT '')""")
+    for col in ("course", "chapter", "topic", "source_url", "license", "version"):
         try:
             c.execute(f"ALTER TABLE knowledge ADD COLUMN {col} TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass
     # ponytail: store bcrypt hashes so login works with _check_pw
     c.execute("""CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY, password_hash TEXT, dept TEXT, name TEXT, level INTEGER)""")
+        username TEXT PRIMARY KEY, password_hash TEXT, dept TEXT, name TEXT, level INTEGER,
+        role TEXT NOT NULL DEFAULT 'student', status TEXT NOT NULL DEFAULT 'approved')""")
+    for col, default in (("role", "student"), ("status", "approved")):
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT NOT NULL DEFAULT '{default}'")
+        except sqlite3.OperationalError:
+            pass
     c.execute("""CREATE TABLE IF NOT EXISTS ingest_jobs (
         job_id TEXT PRIMARY KEY, filename TEXT, status TEXT, pct INTEGER, msg TEXT, chunks INTEGER, updated_at TEXT)""")
     # Seed test accounts with bcrypt hashes
     for uname, info in MOCK_USERS.items():
         # The in-memory mock password is already a bcrypt hash.
-        c.execute("INSERT OR REPLACE INTO users (username,password_hash,dept,name,level) VALUES (?,?,?,?,?)",
-                  (uname, info["password"], info["dept"], info["name"], info["level"]))
+        role = "admin" if uname == "wangwu" else "student"
+        c.execute("""INSERT INTO users (username,password_hash,dept,name,level,role,status) VALUES (?,?,?,?,?,?,?)
+                     ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash, dept=excluded.dept,
+                     name=excluded.name, level=excluded.level, role=excluded.role, status=excluded.status""",
+                  (uname, info["password"], info["dept"], info["name"], info["level"], role, "approved"))
     conn.commit(); conn.close()
 _init_db()
 
@@ -330,13 +376,14 @@ def _get_chroma_collection(collection_name="education_kb"):
     client = chromadb.PersistentClient(path=str(DB_DIR))
     return client.get_or_create_collection(collection_name, metadata={"hnsw:space": "cosine"})
 
-def _record_uploaded(filename, filepath, size_bytes, chunks_added, course="", chapter=""):
+def _record_uploaded(filename, filepath, size_bytes, chunks_added, course="", chapter="", topic="", source_url="", license_name="", version=""):
 
     try:
         conn = sqlite3.connect(str(SESSION_DB))
         conn.execute(
-            "INSERT OR REPLACE INTO knowledge (filename,filepath,size_bytes,chunks_added,uploaded_at,course,chapter) VALUES (?,?,?,?,?,?,?)",
-            (filename, str(filepath), size_bytes, chunks_added, datetime.now().isoformat(), course, chapter))
+            """INSERT OR REPLACE INTO knowledge (filename,filepath,size_bytes,chunks_added,uploaded_at,course,chapter,topic,source_url,license,version)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (filename, str(filepath), size_bytes, chunks_added, datetime.now().isoformat(), course, chapter, topic, source_url, license_name, version))
         conn.commit(); conn.close()
     except Exception as e: print(f"[WARN] Knowledge log failed: {e}")
 
@@ -345,13 +392,14 @@ def _user_from_db(username: str):
     try:
         conn = sqlite3.connect(str(SESSION_DB))
         row = conn.execute(
-            "SELECT username,password_hash,dept,name,level FROM users WHERE username=?",
+            "SELECT username,password_hash,dept,name,level,role,status FROM users WHERE username=?",
             (username,)).fetchone()
         conn.close()
         if not row:
             return None
         return {"username": row[0], "password": row[1], "dept": row[2] or "education",
-                "name": row[3] or row[0], "level": row[4] or 1}
+                "name": row[3] or row[0], "level": row[4] or 1,
+                "role": row[5] or "student", "status": row[6] or "approved"}
     except Exception:
         return None
 
@@ -366,7 +414,7 @@ def register(req: RegisterRequest):
     try:
         conn = sqlite3.connect(str(SESSION_DB))
         conn.execute(
-            "INSERT INTO users (username,password_hash,dept,name,level) VALUES (?,?,?,?,1)",
+            "INSERT INTO users (username,password_hash,dept,name,level,role,status) VALUES (?,?,?,?,1,'student','pending')",
             (uname, _hash_pw(req.password), req.dept or "education", req.name or uname))
         conn.commit(); conn.close()
         return {"success": True, "message": "注册成功"}
@@ -378,12 +426,13 @@ def register(req: RegisterRequest):
 @app.get("/api/users/list")
 def list_users(request: Request):
     """Return selectable user identities without password data."""
-    username = _parse_auth_user(request.headers.get("authorization", ""), "")
-    if not username:
-        return JSONResponse(status_code=401, content={"error": "请先登录"})
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    requester = _user_from_db(username)
+    if not _can_use_service(requester):
+        return JSONResponse(status_code=401, content={"error": "请使用已审核账号登录"})
     try:
         conn = sqlite3.connect(str(SESSION_DB))
-        rows = conn.execute("SELECT username,name,dept,level FROM users ORDER BY username").fetchall()
+        rows = conn.execute("SELECT username,name,dept,level FROM users WHERE status='approved' ORDER BY username").fetchall()
         conn.close()
         return {"success": True, "users": [
             {"username": r[0], "name": r[1] or r[0], "dept": r[2] or "education", "level": r[3]}
@@ -396,16 +445,51 @@ def list_users(request: Request):
 def login(req: LoginRequest):
     user = _user_from_db(req.username)
     if user and _check_pw(user["password"], req.password):
+        if not _can_use_service(user):
+            return JSONResponse(status_code=403, content={"error": "账号待管理员审核"})
         token = _jwt_encode({"sub": req.username, "dept": user["dept"], "level": user["level"]})
         return {"success": True, "token": token,
                 "token_type": "jwt",
                 "user_info": {**{k: v for k, v in user.items() if k != "password"}, "username": req.username, "password_type": "bcrypt"}}
     return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
 
+
+@app.get("/api/admin/users/pending")
+def list_pending_users(request: Request):
+    admin = _admin_from_request(request)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "仅管理员可查看待审核用户"})
+    conn = sqlite3.connect(str(SESSION_DB))
+    rows = conn.execute("SELECT username,name,dept,level,role,status FROM users WHERE status='pending' ORDER BY username").fetchall()
+    conn.close()
+    return {"success": True, "users": [
+        {"username": r[0], "name": r[1] or r[0], "dept": r[2] or "education", "level": r[3], "role": r[4], "status": r[5]}
+        for r in rows
+    ]}
+
+
+@app.post("/api/admin/users/{username}/approve")
+def approve_user(username: str, request: Request):
+    admin = _admin_from_request(request)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "仅管理员可审核用户"})
+    conn = sqlite3.connect(str(SESSION_DB))
+    updated = conn.execute("UPDATE users SET status='approved' WHERE username=? AND status='pending'", (username,)).rowcount
+    conn.commit(); conn.close()
+    if not updated:
+        return JSONResponse(status_code=404, content={"error": "待审核用户不存在"})
+    return {"success": True, "username": username, "status": "approved"}
+
 # ── Image Upload ────────────────────────────────────────────
 @app.post("/api/upload_image")
-async def upload_image(file: UploadFile = File(...)):
-    unique_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+async def upload_image(file: UploadFile = File(...), request: Request = None):
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    if not _can_use_service(_user_from_db(username)):
+        return JSONResponse(status_code=401, content={"error": "请使用已审核账号"})
+    safe_filename = Path(file.filename or "").name
+    if not safe_filename or "/" in safe_filename or "\\" in safe_filename:
+        return JSONResponse(status_code=422, content={"error": "文件名无效"})
+    unique_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}_{safe_filename}"
     dest_path = STATIC_DIR / unique_name
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -491,9 +575,11 @@ def _local_retrieve(query: str, metadata_filter=None, top_k: int = 5, distance_t
             exact_hits = sum(1.5 for w in q_words if w in text_lower)
             scored_pairs.append((exact_hits, d, meta))
         scored_pairs.sort(key=lambda x: x[0], reverse=True)
+        candidate_pairs = [(d, meta) for _, d, meta in scored_pairs]
+        ranked_pairs = _rerank_pairs(query, candidate_pairs, top_k)
 
         parts = []
-        for i, (_, d, meta) in enumerate(scored_pairs[:top_k], 1):
+        for i, (d, meta) in enumerate(ranked_pairs, 1):
             src_meta = meta if isinstance(meta, dict) else {}
             doc_name = src_meta.get("source", src_meta.get("filename", "未知文档"))
             dept = src_meta.get("dept", "通用")
@@ -861,13 +947,12 @@ async def async_stream_deepseek(messages: list, temperature=0.7):
 @app.post("/api/chat")
 async def rag_chat_stream(req: ChatRequest, request: Request):
     """Chat endpoint with Agent Loop + SSE streaming response."""
-    auth_header = request.headers.get("authorization", "")
-    req.username = _parse_auth_user(auth_header, req.username)
-    user_meta = _user_from_db(req.username)
-    if not user_meta:
-        return JSONResponse(status_code=401, content={"error": "Unknown user"})
-    # The JWT identifies the user; use the database profile for registered accounts.
-    req.dept = req.dept or user_meta["dept"]
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    user_meta = _user_from_db(username)
+    if not _can_use_service(user_meta):
+        return JSONResponse(status_code=401, content={"error": "请登录已审核账号"})
+    req.username = username
+    req.dept = user_meta["dept"]
     trace_id = f"tr_{req.username}_{int(time.time()*1000)}"
     # L2: prompt-injection gate before any tool/LLM work
     blocked, reason, ecode = _detect_prompt_injection(req.message)
@@ -979,13 +1064,14 @@ async def rag_chat_stream(req: ChatRequest, request: Request):
 
 # ── Legacy chat (non-streaming, backwards compat) ───────────
 @app.post("/api/chat_legacy")
-def rag_chat(req: ChatRequest):
+def rag_chat(req: ChatRequest, request: Request):
     """Non-streaming version for clients that don't support SSE."""
-    user_meta = _user_from_db(req.username)
-    if not user_meta:
-        return JSONResponse(status_code=401, content={"error": "Unknown user"})
-    # The JWT identifies the user; use the database profile for registered accounts.
-    req.dept = req.dept or user_meta["dept"]
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    user_meta = _user_from_db(username)
+    if not _can_use_service(user_meta):
+        return JSONResponse(status_code=401, content={"error": "请登录已审核账号"})
+    req.username = username
+    req.dept = user_meta["dept"]
     trace_id = f"tr_{req.username}_{int(time.time()*1000)}"
     
     strategy = route_query(req.message, user_meta["level"])
@@ -1065,6 +1151,8 @@ def _sse(event_type: str, **fields) -> str:
 
 # ── Lazy imports for background ingest (loaded on first use) ──
 _SentenceTransformer = None
+_CrossEncoder = None
+_cross_encoder = None
 _chromadb = None
 _embedding_model = None
 
@@ -1156,6 +1244,38 @@ def _ensure_imports():
         except Exception as e:
             print(f"[INGEST IMPORT] chromadb: {type(e).__name__}: {e}")
     return _SentenceTransformer is not None and _chromadb is not None
+
+def _get_cross_encoder():
+    """Optional local Cross-Encoder; disabled unless RERANK_MODEL is configured."""
+    global _CrossEncoder, _cross_encoder
+    model_name = os.environ.get("RERANK_MODEL", "").strip()
+    if not model_name:
+        return None
+    if _cross_encoder is None:
+        try:
+            from sentence_transformers import CrossEncoder
+            _CrossEncoder = CrossEncoder
+            _cross_encoder = _CrossEncoder(model_name)
+        except Exception as exc:
+            print(f"[RERANK] unavailable: {type(exc).__name__}")
+            return None
+    return _cross_encoder
+
+
+def _rerank_pairs(query: str, pairs: list[tuple[str, dict]], top_k: int) -> list[tuple[str, dict]]:
+    model = _get_cross_encoder() or _cross_encoder
+    if not model or not pairs:
+        return pairs[:top_k]
+    try:
+        scores = model.predict([(query, text) for text, _ in pairs])
+        candidate_scores = []
+        for index, (text, metadata) in enumerate(pairs):
+            candidate_scores.append((float(scores[index]), index, (text, metadata)))
+        return [pair for _, _, pair in sorted(candidate_scores, key=lambda item: (-item[0], item[1]))[:top_k]]
+    except Exception as exc:
+        print(f"[RERANK] prediction fallback: {type(exc).__name__}")
+        return pairs[:top_k]
+
 
 def _get_embedding_model():
     global _embedding_model
@@ -1356,7 +1476,8 @@ def _capsule_images(text: str, images: list, filename: str,
 
 def _async_ingest(file_path: Path, original_filename: str, job_id: str = "",
                   access: str = "public", allowed_users: str = "", owner: str = "",
-                  course: str = "", chapter: str = "") :
+                  course: str = "", chapter: str = "", topic: str = "", source_url: str = "",
+                  license_name: str = "", version: str = "") :
     """Background ingest: split → embed → store into ChromaDB."""
     try:
         _set_ingest(job_id, status="running", pct=5, msg="加载模型/依赖...", filename=original_filename)
@@ -1397,12 +1518,13 @@ def _async_ingest(file_path: Path, original_filename: str, job_id: str = "",
         coll = _chromadb.PersistentClient(path=str(DB_DIR)).get_or_create_collection("education_kb")
         ts = datetime.now().strftime('%Y%m%d%H%M%S')
         ids = [f"user_upload_{ts}_{i}" for i in range(len(chunks))]
+        taxonomy = _document_taxonomy(course, chapter, topic, source_url, license_name, version)
         metas = [{"source": original_filename, "type": "upload",
-                  "access": access, "owner": owner, "allowed_users": allowed_users,
-                  "course": course, "chapter": chapter} for _ in chunks]
+                  "access": access, "owner": owner, "allowed_users": allowed_users, **taxonomy} for _ in chunks]
         coll.upsert(ids=ids, documents=chunks, embeddings=vecs.tolist(), metadatas=metas)
 
-        _record_uploaded(original_filename, file_path, file_path.stat().st_size, len(chunks), course, chapter)
+        _record_uploaded(original_filename, file_path, file_path.stat().st_size, len(chunks),
+                         course, chapter, topic, source_url, license_name, version)
         # ponytail: clear answer cache when new knowledge arrives so stale zero-citations expire
         ANSWER_CACHE.clear()
         _set_ingest(job_id, status="done", pct=100, msg=f"完成：{len(chunks)} chunks", chunks=len(chunks))
@@ -1467,6 +1589,10 @@ async def upload_knowledge(
     allowed_users: str = Form(""),
     course: str = Form(""),
     chapter: str = Form(""),
+    topic: str = Form(""),
+    source_url: str = Form(""),
+    license_name: str = Form(""),
+    version: str = Form(""),
     request: Request = None,
     background_tasks: BackgroundTasks = None):
     allowed = {".md", ".markdown", ".txt", ".pdf", ".docx"}
@@ -1477,6 +1603,12 @@ async def upload_knowledge(
     owner = _parse_auth_user(request.headers.get("authorization", ""), "")
     if not owner:
         return JSONResponse(status_code=401, content={"error": "请先登录再上传"})
+    if not _is_admin(_user_from_db(owner)):
+        return JSONResponse(status_code=403, content={"error": "仅管理员可上传知识库"})
+    safe_filename = Path(file.filename or "").name
+    if not safe_filename or safe_filename in {".", ".."} or "/" in safe_filename or "\\" in safe_filename:
+        return JSONResponse(status_code=422, content={"error": "文件名无效"})
+    file.filename = safe_filename
     acl_access, acl_users = _parse_access(access, allowed_users)
     course = course.strip() if course.strip() in COURSE_CATALOG else _classify_course(file.filename or "")[0]
     chapter = chapter.strip() if course and chapter.strip() in COURSE_CATALOG.get(course, []) else ""
@@ -1487,8 +1619,13 @@ async def upload_knowledge(
 
     job_id = unique_name
     _set_ingest(job_id, status="queued", pct=1, msg="已入队", filename=file.filename)
+    topic = topic.strip()
+    source_url = source_url.strip()
+    license_name = license_name.strip()
+    version = version.strip()
     executor.submit(_async_ingest, dest_path, file.filename, job_id,
-                    access=acl_access, allowed_users=acl_users, owner=owner, course=course, chapter=chapter)
+                    access=acl_access, allowed_users=acl_users, owner=owner, course=course, chapter=chapter,
+                    topic=topic, source_url=source_url, license_name=license_name, version=version)
     return {
         "status": "queued",
         "job_id": job_id,
@@ -1497,7 +1634,9 @@ async def upload_knowledge(
     }
 
 @app.get("/api/knowledge/ingest/{job_id}")
-def ingest_progress(job_id: str):
+def ingest_progress(job_id: str, request: Request):
+    if not _admin_from_request(request):
+        return JSONResponse(status_code=403, content={"error": "仅管理员可查看入库任务"})
     job = INGEST_JOBS.get(job_id)
     if not job:
         try:
@@ -1513,7 +1652,14 @@ def ingest_progress(job_id: str):
             "filename": job.get("filename", ""), "chunks": job.get("chunks", 0)}
 
 @app.get("/api/trace/{trace_id}")
-def get_trace(trace_id: str):
+def get_trace(trace_id: str, request: Request):
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    user = _user_from_db(username)
+    if not _can_use_service(user):
+        return JSONResponse(status_code=401, content={"error": "请登录已审核账号"})
+    owner = trace_id.split("_", 2)[1] if trace_id.startswith("tr_") and len(trace_id.split("_", 2)) > 1 else ""
+    if owner and owner != username and not _is_admin(user):
+        return JSONResponse(status_code=403, content={"error": "无权查看此 Trace"})
     evs = TRACE_LOGS.get(trace_id) or []
     return {"trace_id": trace_id, "events": evs, "model": DEEPSEEK_MODEL, "base_url": DEEPSEEK_BASE_URL}
 
@@ -1539,22 +1685,26 @@ def _scan_seed_files():
     return out
 
 @app.get("/api/knowledge/list")
-def list_knowledge():
-    kb_entries = []
+def list_knowledge(request: Request):
+    if not _admin_from_request(request):
+        return JSONResponse(status_code=403, content={"error": "仅管理员可管理知识库"})
     try:
         conn = sqlite3.connect(str(SESSION_DB))
-        rows = conn.execute("SELECT id,filename,size_bytes,chunks_added,uploaded_at,course,chapter FROM knowledge ORDER BY uploaded_at DESC").fetchall()
-        for r in rows:
-            kb_entries.append({"id": r[0], "filename": r[1], "size_bytes": r[2],
-                              "chunks_added": r[3], "uploaded_at": r[4], "course": r[5] or "", "chapter": r[6] or ""})
+        rows = conn.execute("SELECT id,filename,size_bytes,chunks_added,uploaded_at,course,chapter,topic,source_url,license,version FROM knowledge ORDER BY uploaded_at DESC").fetchall()
         conn.close()
-    except:
-        pass
+        kb_entries = [{"id": r[0], "filename": r[1], "size_bytes": r[2], "chunks_added": r[3],
+                       "uploaded_at": r[4], "course": r[5] or "", "chapter": r[6] or "",
+                       "topic": r[7] or "", "source_url": r[8] or "", "license": r[9] or "", "version": r[10] or ""}
+                      for r in rows]
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": f"知识库读取失败：{type(exc).__name__}"})
 
     return {"status": "ok", "uploaded": kb_entries, "seeds": _scan_seed_files()}
 
 @app.delete("/api/knowledge/{doc_id}")
-def delete_knowledge(doc_id: int):
+def delete_knowledge(doc_id: int, request: Request):
+    if not _admin_from_request(request):
+        return JSONResponse(status_code=403, content={"error": "仅管理员可删除知识库文档"})
     try:
         conn = sqlite3.connect(str(SESSION_DB))
         conn.execute("DELETE FROM knowledge WHERE id=?", (doc_id,))
@@ -1565,16 +1715,14 @@ def delete_knowledge(doc_id: int):
 
 # ── Session History ─────────────────────────────────────────
 @app.get("/api/session/history")
-def get_history(username: Optional[str] = None, limit: int = 50):
+def get_history(request: Request, limit: int = 50):
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    user = _user_from_db(username)
+    if not _can_use_service(user):
+        return JSONResponse(status_code=401, content={"error": "请登录已审核账号"})
     try:
         conn = sqlite3.connect(str(SESSION_DB))
-        query = "SELECT id,username,question,answer,ts,trace_id FROM sessions"
-        params = []
-        if username:
-            query += " WHERE username=?"; params.append(username)
-        query += " ORDER BY id DESC LIMIT ?"
-        params.append(limit)
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute("SELECT id,username,question,answer,ts,trace_id FROM sessions WHERE username=? ORDER BY id DESC LIMIT ?", (username, max(1, min(limit, 100)))).fetchall()
         conn.close()
         return {"status": "ok", "history": [
             {"id": r[0], "username": r[1], "question": r[2][:500], "answer": r[3][:500], "ts": r[4], "trace_id": r[5]}
@@ -1585,8 +1733,18 @@ def get_history(username: Optional[str] = None, limit: int = 50):
 
 # ── Human Feedback (Thumbs Up / Down) ───────────────────────
 @app.post("/api/feedback")
-def submit_feedback(req: FeedbackRequest):
-    """Record thumbs up/down; thumbs_up=None means cancel previous rating."""
+def submit_feedback(req: FeedbackRequest, request: Request):
+    """Record thumbs up/down only for the authenticated owner's session."""
+    username = _parse_auth_user(request.headers.get("authorization", ""))
+    user = _user_from_db(username)
+    if not _can_use_service(user):
+        return JSONResponse(status_code=401, content={"error": "请登录已审核账号"})
+    conn = sqlite3.connect(str(SESSION_DB))
+    owns_session = conn.execute("SELECT 1 FROM sessions WHERE id=? AND username=?", (req.session_id, username)).fetchone()
+    conn.close()
+    if not owns_session:
+        return JSONResponse(status_code=403, content={"error": "无权评价此会话"})
+    req.username = username
     try:
         with open(FEEDBACK_DB, "a", encoding="utf-8") as f:
             f.write(json.dumps({

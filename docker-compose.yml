@@ -5,7 +5,7 @@ services:
     build: .
     image: smart-rag-agent:latest
     container_name: smart-rag-agent
-    command: python -m uvicorn server:app --host 0.0.0.0 --port 8000
+    command: python -m uvicorn server:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-1}
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8000}:8000"

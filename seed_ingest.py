@@ -50,8 +50,7 @@ def main() -> int:
         chunks = server._simple_split(_clean(text), chunk_size=600, overlap=120)
         all_chunks += chunks
         course, chapter = server._classify_course(f"{f.name} {text[:3000]}")
-        all_metas += [{"source": f.name, "type": kind, "course": course, "chapter": chapter,
-                       "access": "public", "owner": "", "allowed_users": ""} for _ in chunks]
+        all_metas += [server._seed_metadata(f.name, course, chapter) for _ in chunks]
         all_ids += [f"seed_{ts}_{n + i}" for i in range(len(chunks))]
         n += len(chunks)
         print(f"  {f.name}: {len(chunks)} chunks")
